@@ -134,7 +134,6 @@ public class TikTokAudioSourceManager extends AbstractDuncteBotHttpSource {
             String body = IOUtils.toString(response.getEntity().getContent(), StandardCharsets.UTF_8);
 
             JsonBrowser json = JsonBrowser.parse(body);
-
             JsonBrowser data = json.get("data");
 
             if (data.isNull()) {
@@ -150,7 +149,8 @@ public class TikTokAudioSourceManager extends AbstractDuncteBotHttpSource {
             meta.videoUrl = data.get("play").safeText();
             meta.uri = meta.videoUrl;
 
-            meta.duration = Integer.parseInt(data.get("duration").safeText("0"));
+            String durationText = data.get("duration").safeText();
+            meta.duration = durationText.isEmpty() ? 0 : Integer.parseInt(durationText);
 
             meta.musicUrl = data.get("music").safeText();
             meta.uniqueId = data.get("author").get("unique_id").safeText();
@@ -170,7 +170,6 @@ public class TikTokAudioSourceManager extends AbstractDuncteBotHttpSource {
         String title;
 
         String musicUrl;
-
         String uniqueId;
 
         AudioTrackInfo toTrackInfo() {
@@ -201,4 +200,4 @@ public class TikTokAudioSourceManager extends AbstractDuncteBotHttpSource {
                     '}';
         }
     }
-    }
+}
