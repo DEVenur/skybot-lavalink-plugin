@@ -36,7 +36,6 @@ public class TikTokAudioTrackHttpManager implements AutoCloseable {
     private final CookieStore cookieStore = new BasicCookieStore();
 
     public TikTokAudioTrackHttpManager() {
-
         this.httpInterfaceManager = HttpClientTools.createDefaultThreadLocalManager();
 
         this.httpInterfaceManager.configureBuilder(builder -> {
@@ -64,24 +63,25 @@ public class TikTokAudioTrackHttpManager implements AutoCloseable {
 
         @Override
         public void onContextClose(HttpClientContext context) {
-            // nothing
+            // nothing to do
         }
 
         @Override
         public void onRequest(HttpClientContext context, HttpUriRequest request, boolean isRepetition) {
 
-            final boolean isVideoRequest = request.getURI().getPath() != null &&
+            boolean isVideoRequest =
+                    request.getURI().getPath() != null &&
                     request.getURI().getPath().contains("video");
 
             fakeChrome(request, isVideoRequest);
 
-            request.setHeader("Accept",
-                    "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8");
+            request.setHeader(
+                    "Accept",
+                    "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8"
+            );
 
             request.setHeader("Accept-Language", "en-US,en;q=0.9");
-
             request.setHeader("Connection", "keep-alive");
-
             request.setHeader("Referer", "https://www.tiktok.com/");
 
             String cookies = context.getCookieStore()
@@ -105,4 +105,4 @@ public class TikTokAudioTrackHttpManager implements AutoCloseable {
             return false;
         }
     }
-        }
+}
