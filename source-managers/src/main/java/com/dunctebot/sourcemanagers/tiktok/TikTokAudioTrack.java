@@ -32,8 +32,9 @@ import com.sedmelluq.discord.lavaplayer.track.playback.LocalAudioTrackExecutor;
 import static com.sedmelluq.discord.lavaplayer.tools.FriendlyException.Severity.SUSPICIOUS;
 
 public class TikTokAudioTrack extends MpegTrack {
-    private Pair<String, String> urlCache = null;
-    private boolean failedOnce = false;
+
+    private Pair<String, String> urlCache;
+    private boolean failedOnce;
 
     public TikTokAudioTrack(AudioTrackInfo trackInfo, AbstractDuncteBotHttpSource manager) {
         super(trackInfo, manager);
@@ -46,15 +47,17 @@ public class TikTokAudioTrack extends MpegTrack {
     @Override
     public String getPlaybackUrl() {
         try {
-            if (this.urlCache == null) {
-                this.urlCache = loadPlaybackUrl();
+
+            if (urlCache == null) {
+                urlCache = loadPlaybackUrl();
             }
 
-            if (this.failedOnce) {
-                return this.urlCache.getRight();
+            if (failedOnce) {
+                return urlCache.getRight();
             }
 
-            return this.urlCache.getLeft();
+            return urlCache.getLeft();
+
         } catch (Exception e) {
             throw new FriendlyException("Could not load TikTok video", SUSPICIOUS, e);
         }
@@ -62,57 +65,56 @@ public class TikTokAudioTrack extends MpegTrack {
 
     @Override
     public void process(LocalAudioTrackExecutor executor) throws Exception {
-        try (HttpInterface httpInterface = this.getHttpInterface()) {
+        try (HttpInterface httpInterface = getHttpInterface()) {
             loadStream(executor, httpInterface);
         }
     }
 
     @Override
-    protected void loadStream(LocalAudioTrackExecutor localExecutor, HttpInterface httpInterface) throws Exception {
+    protected void loadStream(LocalAudioTrackExecutor executor, HttpInterface httpInterface) throws Exception {
+
         try {
-            super.loadStream(localExecutor, httpInterface);
-        } catch (Exception e) {
-            if (this.failedOnce) {
-                throw e;
+
+            super.loadStream(executor, httpInterface);
+
+        } catch (Exception firstFailure) {
+
+            if (failedOnce) {
+                throw firstFailure;
             }
 
-            this.failedOnce = true;
-            super.loadStream(localExecutor, httpInterface);
+            failedOnce = true;
+
+            if (urlCache == null) {
+                urlCache = loadPlaybackUrl();
+            }
+
+            super.loadStream(executor, httpInterface);
         }
     }
 
-    /*@Override
-    protected void loadStream(LocalAudioTrackExecutor localExecutor, HttpInterface httpInterface) throws Exception {
-        final String trackUrl = getPlaybackUrl();
-        log.debug("Starting {} track from URL: {}", getSourceManager().getSourceName(), trackUrl);
-        // Setting contentLength (last param) to null makes it default to Long.MAX_VALUE
-        try (final PersistentHttpStream stream = new PersistentHttpStream(httpInterface, new URI(trackUrl), Units.CONTENT_LENGTH_UNKNOWN)) {
-            // dump the stream
-            Files.copy(
-                stream,
-                new File("DUMP.raw").toPath(),
-                StandardCopyOption.REPLACE_EXISTING
-            );
-
-            processDelegate(createAudioTrack(this.trackInfo, stream), localExecutor);
-        }
-    }*/
-
     protected Pair<String, String> loadPlaybackUrl() throws Exception {
-        final TikTokAudioSourceManager.MetaData metdata = this.getSourceManager().extractData(
-            this.trackInfo.author,
-            this.trackInfo.identifier
-        );
+
+        TikTokAudioSourceManager.MetaData metadata =
+                getSourceManager().extractData(
+                        trackInfo.author,
+                        trackInfo.identifier
+                );
+
+        if (metadata == null || metadata.videoUrl == null) {
+            throw new FriendlyException("TikTok metadata extraction failed", SUSPICIOUS, null);
+        }
 
         return new Pair<>(
-            metdata.videoUrl,
-            metdata.musicUrl
+                metadata.videoUrl,
+                metadata.musicUrl
         );
     }
 
     @Override
     protected InternalAudioTrack createAudioTrack(AudioTrackInfo trackInfo, SeekableInputStream stream) {
-        if (this.failedOnce && this.urlCache.getRight().contains(".mp3")) {
+
+        if (failedOnce && urlCache != null && urlCache.getRight() != null && urlCache.getRight().contains(".mp3")) {
             return new Mp3AudioTrack(trackInfo, stream);
         }
 
@@ -126,7 +128,7 @@ public class TikTokAudioTrack extends MpegTrack {
 
     @Override
     protected HttpInterface getHttpInterface() {
-        return this.getSourceManager().getHttpInterface();
+        return getSourceManager().getHttpInterface();
     }
 
     @Override
@@ -136,6 +138,6 @@ public class TikTokAudioTrack extends MpegTrack {
 
     @Override
     protected AudioTrack makeShallowClone() {
-        return new TikTokAudioTrack(this.trackInfo, getSourceManager());
+        return new TikTokAudioTrack(trackInfo, getSourceManager());
     }
-}
+            }
