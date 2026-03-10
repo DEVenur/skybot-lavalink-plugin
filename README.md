@@ -14,6 +14,7 @@ Adding support for the following sources:
   - These files are only accepted over HTTP currently
 - Pixeldrain.com
 - Tumblr.com (when it does not throw a 403 your way)
+- Instagram (in testing)
 
 ## Lavalink version compatibility
 
