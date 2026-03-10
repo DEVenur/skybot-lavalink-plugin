@@ -1,17 +1,17 @@
-package com.dunctebot.sourcemanagers;
+package com.dunctebot.sourcemanagers.instagram;
 
 import com.sedmelluq.discord.lavaplayer.source.AudioSourceManager;
 import com.sedmelluq.discord.lavaplayer.track.*;
-import com.sedmelluq.discord.lavaplayer.tools.io.HttpClientTools;
 import com.sedmelluq.discord.lavaplayer.tools.FriendlyException;
+import com.sedmelluq.discord.lavaplayer.tools.io.HttpClientTools;
 
 import org.json.*;
 
 import java.io.InputStream;
 import java.net.*;
+import java.nio.charset.StandardCharsets;
 import java.util.*;
 import java.util.regex.*;
-import java.nio.charset.StandardCharsets;
 
 public class InstagramSourceManager implements AudioSourceManager {
 
@@ -20,9 +20,9 @@ public class InstagramSourceManager implements AudioSourceManager {
 
     public InstagramSourceManager() {
         patterns = Arrays.asList(
-                Pattern.compile("^https?://(?:www\\.)?instagram\\.com/reels/audio/(\\d+)"),
-                Pattern.compile("^https?://(?:www\\.)?instagram\\.com/p/([\\w-]+)"),
-                Pattern.compile("^https?://(?:www\\.)?instagram\\.com/(?:reels?|reel)/([\\w-]+)")
+            Pattern.compile("^https?://(?:www\\.)?instagram\\.com/reels/audio/(\\d+)"),
+            Pattern.compile("^https?://(?:www\\.)?instagram\\.com/p/([\\w-]+)"),
+            Pattern.compile("^https?://(?:www\\.)?instagram\\.com/(?:reels?|reel)/([\\w-]+)")
         );
 
         apiConfig = new HashMap<>();
@@ -48,15 +48,6 @@ public class InstagramSourceManager implements AudioSourceManager {
         return Map.of("id", null, "type", null);
     }
 
-    private String fetchInstagramHomepage() throws Exception {
-        HttpURLConnection conn = (HttpURLConnection) new URL("https://www.instagram.com/").openConnection();
-        conn.setRequestMethod("GET");
-        conn.setRequestProperty("User-Agent", "Mozilla/5.0");
-        try (InputStream in = conn.getInputStream(); Scanner s = new Scanner(in, StandardCharsets.UTF_8)) {
-            return s.useDelimiter("\\A").next();
-        }
-    }
-
     public boolean setup() {
         try {
             String body = fetchInstagramHomepage();
@@ -76,6 +67,15 @@ public class InstagramSourceManager implements AudioSourceManager {
         }
     }
 
+    private String fetchInstagramHomepage() throws Exception {
+        HttpURLConnection conn = (HttpURLConnection) new URL("https://www.instagram.com/").openConnection();
+        conn.setRequestMethod("GET");
+        conn.setRequestProperty("User-Agent", "Mozilla/5.0");
+        try (InputStream in = conn.getInputStream(); Scanner s = new Scanner(in, StandardCharsets.UTF_8)) {
+            return s.useDelimiter("\\A").next();
+        }
+    }
+
     private String matchRegex(String text, String regex) {
         Matcher m = Pattern.compile(regex).matcher(text);
         return m.find() ? m.group(1) : null;
@@ -83,11 +83,11 @@ public class InstagramSourceManager implements AudioSourceManager {
 
     private JSONObject fetchFromGraphQL(String postId, String pathSegment) throws Exception {
         String variables = new JSONObject(Map.of(
-                "shortcode", postId,
-                "fetch_comment_count", "null",
-                "fetch_related_profile_media_count", "null",
-                "parent_comment_count", "null",
-                "child_comment_count", "null"
+            "shortcode", postId,
+            "fetch_comment_count", "null",
+            "fetch_related_profile_media_count", "null",
+            "parent_comment_count", "null",
+            "child_comment_count", "null"
         )).toString();
 
         String payload = "variables=" + URLEncoder.encode(variables, StandardCharsets.UTF_8) +
@@ -148,16 +148,11 @@ public class InstagramSourceManager implements AudioSourceManager {
                 throw new FriendlyException("Unknown URL type", FriendlyException.Severity.SUSPICIOUS, null);
             }
 
-            // Extrair URL do vídeo ou áudio
             String videoUrl = type.equals("post") ?
                     data.getJSONObject("data").getJSONObject("xdt_shortcode_media").getString("video_url") :
                     data.getJSONObject("payload").getJSONObject("metadata").getString("progressive_download_url");
 
-            String title = "Instagram Content";
-            String author = "Unknown";
-            int duration = 0;
-
-            return new DelegatedAudioTrack(videoUrl, new AudioTrackInfo(title, author, duration, url, false, null));
+            return new DelegatedAudioTrack(videoUrl, new AudioTrackInfo("Instagram Content", "Unknown", 0, url, false, null));
 
         } catch (Exception e) {
             throw new FriendlyException("Failed to fetch Instagram track", FriendlyException.Severity.COMMON, e);
