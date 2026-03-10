@@ -67,6 +67,7 @@ plugins:
             soundgasm: true # soundgasm.net
             pixeldrain: true # pixeldrain.com
             tumblr: false # tumblr.com, requires an app to be configured with oauth2 support
+            instagram: true # instagram.com
 ```
 
 ## development
