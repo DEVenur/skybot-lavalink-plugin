@@ -7,7 +7,7 @@ Adding support for the following sources:
 - Reddit
 - getyarn.io
 - Text To Speech (if prefixed with `speak:`)
-- TikTok (breaking so often it is not worth my time to fix it)
+- TikTok
 - PornHub (search by prefixing with `phsearch:`)
 - soundgasm
 - streamDeckAudio files
@@ -66,7 +66,6 @@ plugins:
             soundgasm: true # soundgasm.net
             pixeldrain: true # pixeldrain.com
             tumblr: false # tumblr.com, requires an app to be configured with oauth2 support
-            instagram: true # instagram.com
 ```
 
 ## development
