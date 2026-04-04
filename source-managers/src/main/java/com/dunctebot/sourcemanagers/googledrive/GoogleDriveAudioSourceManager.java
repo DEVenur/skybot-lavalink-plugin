@@ -144,7 +144,6 @@ public class GoogleDriveAudioSourceManager extends AbstractDuncteBotHttpSource {
             );
         }
 
-        // We store mimeType in artworkUrl (no thumbnail available for Drive files)
         final AudioTrackInfo trackInfo = new AudioTrackInfo(
                 title,
                 "Google Drive",
@@ -152,8 +151,8 @@ public class GoogleDriveAudioSourceManager extends AbstractDuncteBotHttpSource {
                 id,
                 false,
                 String.format(VIEW_URL_TEMPLATE, id),
-                mimeType, // artworkUrl reused to carry MIME type to the track
-                null
+                null, // no thumbnail available for Drive files
+                mimeType // userData carries the MIME type to the track
         );
 
         return decodeTrack(trackInfo, null);
