@@ -35,11 +35,7 @@ public class GoogleDriveAudioTrack extends Mp3Track {
 
     @Override
     protected InternalAudioTrack createAudioTrack(AudioTrackInfo trackInfo, SeekableInputStream stream) {
-        final String mimeType = this.trackInfo.userData instanceof String ? (String) this.trackInfo.userData : "audio/mpeg";
-
-        if (mimeType == null) {
-            return new Mp3AudioTrack(trackInfo, stream);
-        }
+        final String mimeType = getSourceManager().getCachedMimeType(this.trackInfo.identifier);
 
         switch (mimeType) {
             case "audio/mpeg":
