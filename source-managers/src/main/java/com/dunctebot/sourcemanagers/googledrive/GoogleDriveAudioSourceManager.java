@@ -34,10 +34,20 @@ import java.io.DataInput;
 import java.io.DataOutput;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 public class GoogleDriveAudioSourceManager extends AbstractDuncteBotHttpSource {
+
+    // Cache: fileId → mimeType, so the Track can read it without storing in AudioTrackInfo fields
+    private final Map<String, String> mimeTypeCache = new ConcurrentHashMap<>();
+
+    /** Returns the cached MIME type for a file ID, defaulting to audio/mpeg. */
+    public String getCachedMimeType(String id) {
+        return mimeTypeCache.getOrDefault(id, "audio/mpeg");
+    }
 
     // Matches:
     //   https://drive.google.com/file/d/{ID}/view
@@ -144,6 +154,9 @@ public class GoogleDriveAudioSourceManager extends AbstractDuncteBotHttpSource {
             );
         }
 
+        // Cache the mimeType so the track can retrieve it later via getCachedMimeType()
+        mimeTypeCache.put(id, mimeType);
+
         final AudioTrackInfo trackInfo = new AudioTrackInfo(
                 title,
                 "Google Drive",
@@ -152,7 +165,7 @@ public class GoogleDriveAudioSourceManager extends AbstractDuncteBotHttpSource {
                 false,
                 String.format(VIEW_URL_TEMPLATE, id),
                 null, // no thumbnail available for Drive files
-                mimeType // userData carries the MIME type to the track
+                null
         );
 
         return decodeTrack(trackInfo, null);
