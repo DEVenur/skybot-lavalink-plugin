@@ -54,6 +54,7 @@ public class DuncteBotConfig {
         private boolean elgato = false;
         private boolean pixeldrain = false;
         private boolean tumblr = false;
+        private boolean googledrive = true; // google drive audio files
 
         public boolean isGetyarn() {
             return getyarn;
@@ -149,6 +150,14 @@ public class DuncteBotConfig {
 
         public void setTumblr(boolean tumblr) {
             this.tumblr = tumblr;
+        }
+
+        public boolean isGoogledrive() {
+            return googledrive;
+        }
+
+        public void setGoogledrive(boolean googledrive) {
+            this.googledrive = googledrive;
         }
     }
 }

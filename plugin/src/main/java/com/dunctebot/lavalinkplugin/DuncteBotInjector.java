@@ -3,6 +3,7 @@ package com.dunctebot.lavalinkplugin;
 import com.dunctebot.sourcemanagers.clypit.ClypitAudioSourceManager;
 import com.dunctebot.sourcemanagers.elgato.streamdeck.StreamDeckAudioSourceManager;
 import com.dunctebot.sourcemanagers.getyarn.GetyarnAudioSourceManager;
+import com.dunctebot.sourcemanagers.googledrive.GoogleDriveAudioSourceManager;
 import com.dunctebot.sourcemanagers.mixcloud.MixcloudAudioSourceManager;
 import com.dunctebot.sourcemanagers.ocremix.OCRemixAudioSourceManager;
 import com.dunctebot.sourcemanagers.pixeldrain.PixeldrainAudioSourceManager;
@@ -42,6 +43,7 @@ public class DuncteBotInjector implements AudioPlayerManagerConfiguration {
                 entry("Soundgasm", new SourceManagerInfo(sourcesConfig::isSoundgasm, SoundGasmAudioSourceManager::new)),
                 entry("Elgato (.streamDeckAudio)", new SourceManagerInfo(sourcesConfig::isElgato, StreamDeckAudioSourceManager::new)),
                 entry("pixeldrain", new SourceManagerInfo(sourcesConfig::isPixeldrain, PixeldrainAudioSourceManager::new)),
+                entry("Google Drive", new SourceManagerInfo(sourcesConfig::isGoogledrive, GoogleDriveAudioSourceManager::new)),
                 entry("Text To Speech", new SourceManagerInfo(sourcesConfig::isTts, () -> {
                     final String lang = Objects.requireNonNullElse(config.getTtsLanguage(), "en-AU");
 
