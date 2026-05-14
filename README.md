@@ -54,7 +54,8 @@ plugins:
         tumblr:
           consumerKey: "<YOUR tumblr consumer key>"
           secretKey: "<YOUR tumblr secret key>"
-        driveKey: "YOUR google drive api key"
+        googledrive:
+          driveKey: "<YOUR drive api key>"
         sources:
             # true = source enabled, false = source disabled
             getyarn: true # www.getyarn.io
