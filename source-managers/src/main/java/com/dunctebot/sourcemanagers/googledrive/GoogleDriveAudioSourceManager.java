@@ -29,26 +29,54 @@ import org.apache.http.Header;
 import org.apache.http.client.methods.CloseableHttpResponse;
 import org.apache.http.client.methods.HttpGet;
 import org.apache.http.client.methods.HttpHead;
+import org.apache.http.client.utils.URIBuilder;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.DataInput;
 import java.io.DataOutput;
 import java.io.IOException;
 import java.io.InputStream;
+import java.net.URISyntaxException;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+import com.grack.nanojson.JsonArray;
+import com.grack.nanojson.JsonObject;
+import com.grack.nanojson.JsonParser;
+import com.grack.nanojson.JsonParserException;
+
 public class GoogleDriveAudioSourceManager extends AbstractDuncteBotHttpSource {
+
+    private static final Logger log = LoggerFactory.getLogger(GoogleDriveAudioSourceManager.class);
 
     // Cache: fileId -> mimeType
     private final Map<String, String> mimeTypeCache = new ConcurrentHashMap<>();
 
-    public String getCachedMimeType(String id) {
-        return mimeTypeCache.getOrDefault(id, "audio/mpeg");
-    }
+    // ── Search ────────────────────────────────────────────────────────────────
+
+    /** Prefix used by callers: e.g. "dvsearch:lofi hip hop" */
+    private static final String SEARCH_PREFIX = "dvsearch:";
+
+    /**
+     * Drive API v3 files.list endpoint.
+     * Fields: only what we need – keeps the response small.
+     * Query restricts to audio/* MIME types that are publicly readable.
+     */
+    private static final String DRIVE_SEARCH_URL = "https://www.googleapis.com/drive/v3/files";
+
+    /** Max results returned per search query. */
+    private static final int SEARCH_MAX_RESULTS = 5;
+
+    private final String driveKey; // Google Cloud API Key (nullable – search disabled if null)
+
+    // ── URL / download templates ──────────────────────────────────────────────
 
     private static final Pattern DRIVE_URL_PATTERN = Pattern.compile(
         "https?://drive\\.google\\.com/(?:file/d/([a-zA-Z0-9_-]+)|open\\?(?:.*&)?id=([a-zA-Z0-9_-]+))"
@@ -61,18 +89,67 @@ public class GoogleDriveAudioSourceManager extends AbstractDuncteBotHttpSource {
     // 64 KB is enough to cover virtually all ID3 headers
     private static final int ID3_READ_BYTES = 65536;
 
+    // ── Constructors ──────────────────────────────────────────────────────────
+
+    /** No-arg constructor – search disabled. */
+    public GoogleDriveAudioSourceManager() {
+        this(null);
+    }
+
+    /**
+     * @param driveKey Google Cloud API Key with Drive API enabled.
+     *                  Pass null to disable dvsearch: support.
+     */
+    public GoogleDriveAudioSourceManager(String driveKey) {
+        this.driveKey = driveKey;
+        if (driveKey == null) {
+            log.info("GoogleDriveAudioSourceManager: driveKey not set — dvsearch: disabled");
+        }
+    }
+
+    // ── Source name ───────────────────────────────────────────────────────────
+
+    public String getCachedMimeType(String id) {
+        return mimeTypeCache.getOrDefault(id, "audio/mpeg");
+    }
+
     @Override
     public String getSourceName() {
         return "googledrive";
     }
 
+    // ── Load item (entry point) ───────────────────────────────────────────────
+
     @Override
     public AudioItem loadItem(AudioPlayerManager manager, AudioReference reference) {
-        final String id = extractId(reference.getIdentifier());
+        final String identifier = reference.getIdentifier();
 
-        if (id == null) {
-            return null;
+        // ── dvsearch: branch ─────────────────────────────────────────────────
+        if (identifier.startsWith(SEARCH_PREFIX)) {
+            if (driveKey == null) {
+                throw new FriendlyException(
+                    "dvsearch: is disabled — set plugins.dunctebot.driveKey in your application.yml",
+                    FriendlyException.Severity.COMMON,
+                    null
+                );
+            }
+            final String query = identifier.substring(SEARCH_PREFIX.length()).trim();
+            if (query.isEmpty()) return AudioReference.NO_TRACK;
+
+            try {
+                return searchDrive(query);
+            } catch (IOException | URISyntaxException e) {
+                throw new FriendlyException(
+                    "Google Drive search failed: " + e.getMessage(),
+                    FriendlyException.Severity.SUSPICIOUS,
+                    e
+                );
+            }
         }
+
+        // ── Direct URL branch ────────────────────────────────────────────────
+        final String id = extractId(identifier);
+        if (id == null) return null;
 
         try {
             return buildTrack(id);
@@ -83,6 +160,100 @@ public class GoogleDriveAudioSourceManager extends AbstractDuncteBotHttpSource {
                 e
             );
         }
+    }
+
+    // ── Search ────────────────────────────────────────────────────────────────
+
+    /**
+     * Searches Google Drive for public audio files matching query.
+     *
+     * Uses the Drive API v3 files.list endpoint with:
+     * - q: fullText search restricted to audio/* MIME types
+     * - key: API key (no OAuth required for public files)
+     * - fields: minimal projection to keep the response small
+     *
+     * @return The first matching AudioItem, or AudioReference.NO_TRACK if none found.
+     */
+    private AudioItem searchDrive(String query) throws IOException, URISyntaxException {
+        final String driveQuery = String.format(
+            "fullText contains '%s' and mimeType contains 'audio/' and visibility = 'anyoneCanFind'",
+            query.replace("'", "\\'")   // escape single quotes in user query
+        );
+
+        final String url = new URIBuilder(DRIVE_SEARCH_URL)
+            .addParameter("q", driveQuery)
+            .addParameter("key", driveKey)
+            .addParameter("pageSize", String.valueOf(SEARCH_MAX_RESULTS))
+            .addParameter("fields", "files(id,name,mimeType)")
+            .addParameter("orderBy", "viewCount desc") // most-viewed first
+            .build()
+            .toString();
+
+        final HttpGet get = new HttpGet(url);
+
+        try (CloseableHttpResponse response = getHttpInterface().execute(get)) {
+            final int status = response.getStatusLine().getStatusCode();
+            final String body = IOUtils.toString(response.getEntity().getContent(), StandardCharsets.UTF_8);
+
+            if (status == 400) {
+                log.warn("Drive search bad request (check query syntax): {}", body);
+                return AudioReference.NO_TRACK;
+            }
+            if (status == 403) {
+                log.error("Drive search 403 — check that your API key has Drive API enabled and is not restricted: {}", body);
+                throw new FriendlyException(
+                    "Drive API key rejected (403) — see server logs",
+                    FriendlyException.Severity.COMMON, null
+                );
+            }
+            if (status != 200) {
+                throw new IOException("Drive search returned unexpected status " + status + ": " + body);
+            }
+
+            return parseSearchResults(body);
+        }
+    }
+
+    /**
+     * Parses the files.list JSON response and returns the first loadable track.
+     * Falls back to subsequent results if the first file fails to load (e.g. private/deleted).
+     */
+    private AudioItem parseSearchResults(String json) throws IOException {
+        final JsonObject root;
+        try {
+            root = JsonParser.object().from(json);
+        } catch (JsonParserException e) {
+            throw new IOException("Failed to parse Drive search response", e);
+        }
+
+        final JsonArray files = root.getArray("files");
+        if (files == null || files.isEmpty()) {
+            return AudioReference.NO_TRACK;
+        }
+
+        // Collect candidate IDs
+        final List<String> candidateIds = new ArrayList<>();
+        for (int i = 0; i < files.size(); i++) {
+            final JsonObject file = files.getObject(i);
+            if (file == null) continue;
+            final String mimeType = file.getString("mimeType", "");
+            if (!mimeType.startsWith("audio/")) continue; // double-check
+            candidateIds.add(file.getString("id"));
+        }
+
+        if (candidateIds.isEmpty()) return AudioReference.NO_TRACK;
+
+        // Try each candidate in order; skip files that fail to build
+        for (final String id : candidateIds) {
+            try {
+                final AudioItem item = buildTrack(id);
+                if (item != null) return item;
+            } catch (FriendlyException | IOException e) {
+                log.debug("Drive search: skipping file {} — {}", id, e.getMessage());
+            }
+        }
+
+        return AudioReference.NO_TRACK;
     }
 
     // ── helpers ───────────────────────────────────────────────────────────────
@@ -204,7 +375,7 @@ public class GoogleDriveAudioSourceManager extends AbstractDuncteBotHttpSource {
     }
 
     /**
-     * Loads the Drive HTML page and extracts the filename from the <title> tag.
+     * Loads the Drive HTML page and extracts the filename from the title tag.
      * Returns null if the file is private or not found.
      */
     private String fetchTitle(String id) throws IOException {
