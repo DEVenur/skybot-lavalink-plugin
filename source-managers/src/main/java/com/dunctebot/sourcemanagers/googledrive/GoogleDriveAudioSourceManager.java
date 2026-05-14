@@ -33,7 +33,9 @@ import org.apache.http.client.methods.HttpHead;
 import java.io.DataInput;
 import java.io.DataOutput;
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Matcher;
@@ -41,27 +43,23 @@ import java.util.regex.Pattern;
 
 public class GoogleDriveAudioSourceManager extends AbstractDuncteBotHttpSource {
 
-    // Cache: fileId → mimeType, so the Track can read it without storing in AudioTrackInfo fields
+    // Cache: fileId -> mimeType
     private final Map<String, String> mimeTypeCache = new ConcurrentHashMap<>();
 
-    /** Returns the cached MIME type for a file ID, defaulting to audio/mpeg. */
     public String getCachedMimeType(String id) {
         return mimeTypeCache.getOrDefault(id, "audio/mpeg");
     }
 
-    // Matches:
-    //   https://drive.google.com/file/d/{ID}/view
-    //   https://drive.google.com/file/d/{ID}/view?usp=sharing
-    //   https://drive.google.com/open?id={ID}
     private static final Pattern DRIVE_URL_PATTERN = Pattern.compile(
-            "https?://drive\\.google\\.com/(?:file/d/([a-zA-Z0-9_-]+)|open\\?(?:.*&)?id=([a-zA-Z0-9_-]+))"
+        "https?://drive\\.google\\.com/(?:file/d/([a-zA-Z0-9_-]+)|open\\?(?:.*&)?id=([a-zA-Z0-9_-]+))"
     );
 
-    // Direct download URL template
-    private static final String DOWNLOAD_TEMPLATE = "https://drive.google.com/uc?export=download&id=%s";
+    private static final String DOWNLOAD_TEMPLATE  = "https://drive.google.com/uc?export=download&id=%s";
+    private static final String VIEW_URL_TEMPLATE  = "https://drive.google.com/file/d/%s/view";
+    private static final String THUMBNAIL_TEMPLATE = "https://drive.google.com/thumbnail?id=%s&sz=w500";
 
-    // Metadata API (no key needed for public files — just the HTML page)
-    private static final String VIEW_URL_TEMPLATE = "https://drive.google.com/file/d/%s/view";
+    // 64 KB is enough to cover virtually all ID3 headers
+    private static final int ID3_READ_BYTES = 65536;
 
     @Override
     public String getSourceName() {
@@ -80,100 +78,134 @@ public class GoogleDriveAudioSourceManager extends AbstractDuncteBotHttpSource {
             return buildTrack(id);
         } catch (IOException e) {
             throw new FriendlyException(
-                    "Could not load Google Drive track",
-                    FriendlyException.Severity.SUSPICIOUS,
-                    e
+                "Could not load Google Drive track",
+                FriendlyException.Severity.SUSPICIOUS,
+                e
             );
         }
     }
 
-    // ── helpers ──────────────────────────────────────────────────────────────
+    // ── helpers ───────────────────────────────────────────────────────────────
 
     private String extractId(String url) {
         final Matcher matcher = DRIVE_URL_PATTERN.matcher(url);
-
-        if (!matcher.find()) {
-            return null;
-        }
-
-        // group 1 → /file/d/{ID}  |  group 2 → ?id={ID}
+        if (!matcher.find()) return null;
         return matcher.group(1) != null ? matcher.group(1) : matcher.group(2);
     }
 
     private AudioItem buildTrack(String id) throws IOException {
-        // 1. Fetch the HTML page to get the file name shown by Drive
-        final String title = fetchTitle(id);
+        // 1. Fetch HTML page title (filename)
+        final String filename = fetchTitle(id);
 
-        if (title == null) {
+        if (filename == null) {
             throw new FriendlyException(
-                    "This Google Drive file is not publicly accessible",
-                    FriendlyException.Severity.COMMON,
-                    null
+                "This Google Drive file is not publicly accessible",
+                FriendlyException.Severity.COMMON,
+                null
             );
         }
 
-        // 2. HEAD request on the download URL to get Content-Type & Content-Length
+        // 2. HEAD request to get MIME type
         final String downloadUrl = getDownloadUrl(id);
-        final HttpHead head = new HttpHead(downloadUrl);
+        String mimeType = "audio/mpeg";
 
-        String mimeType = "audio/mpeg"; // safe default
-        long contentLength = Units.CONTENT_LENGTH_UNKNOWN;
-
-        try (CloseableHttpResponse response = getHttpInterface().execute(head)) {
+        try (CloseableHttpResponse response = getHttpInterface().execute(new HttpHead(downloadUrl))) {
             final int status = response.getStatusLine().getStatusCode();
 
             if (status == 404) {
                 throw new FriendlyException("Google Drive file not found", FriendlyException.Severity.COMMON, null);
             }
-
             if (status != 200 && status != 302) {
-                throw new IOException("Unexpected status from Drive download HEAD: " + status);
+                throw new IOException("Unexpected status from Drive HEAD: " + status);
             }
 
             final Header contentType = response.getFirstHeader("Content-Type");
             if (contentType != null) {
-                // strip charset if present: "audio/mpeg; charset=utf-8" → "audio/mpeg"
                 mimeType = contentType.getValue().split(";")[0].trim();
-            }
-
-            final Header contentLengthHeader = response.getFirstHeader("Content-Length");
-            if (contentLengthHeader != null) {
-                try {
-                    contentLength = Long.parseLong(contentLengthHeader.getValue());
-                } catch (NumberFormatException ignored) {
-                    // keep CONTENT_LENGTH_UNKNOWN
-                }
             }
         }
 
         if (!mimeType.startsWith("audio/")) {
             throw new FriendlyException(
-                    "This Google Drive file is not an audio file (detected: " + mimeType + ")",
-                    FriendlyException.Severity.COMMON,
-                    null
+                "This Google Drive file is not an audio file (detected: " + mimeType + ")",
+                FriendlyException.Severity.COMMON,
+                null
             );
         }
 
-        // Cache the mimeType so the track can retrieve it later via getCachedMimeType()
         mimeTypeCache.put(id, mimeType);
 
+        // 3. Range request: read first 64 KB to extract ID3 tags
+        final Id3TagReader id3 = fetchId3Tags(downloadUrl);
+
+        // Title + Author: ID3 tags > filename parsing > fallback
+        final String[] parsed = parseArtistAndTitle(filename);
+        final String trackTitle  = id3.title  != null ? id3.title  : parsed[0];
+        final String trackAuthor = id3.artist != null ? id3.artist : parsed[1];
+
+        // Duration: ID3 TLEN (ms) > CONTENT_LENGTH_UNKNOWN
+        final long duration = id3.durationMs > 0 ? id3.durationMs : Units.CONTENT_LENGTH_UNKNOWN;
+
+        // Thumbnail: ID3 APIC embedded cover > Drive thumbnail URL
+        final String thumbnailUrl = id3.artworkDataUri != null
+            ? id3.artworkDataUri
+            : String.format(THUMBNAIL_TEMPLATE, id);
+
         final AudioTrackInfo trackInfo = new AudioTrackInfo(
-                title,
-                "Google Drive",
-                contentLength,
-                id,
-                false,
-                String.format(VIEW_URL_TEMPLATE, id),
-                null, // no thumbnail available for Drive files
-                null
+            trackTitle,
+            trackAuthor,
+            duration,
+            id,
+            false,
+            String.format(VIEW_URL_TEMPLATE, id),
+            thumbnailUrl,
+            null
         );
 
         return decodeTrack(trackInfo, null);
     }
 
     /**
-     * Loads the Drive HTML page and extracts the file name from the {@code <title>} tag.
-     * Returns {@code null} if the file is private or not found.
+     * Issues a Range request for the first 64 KB of the audio file
+     * and parses the ID3 header from those bytes.
+     */
+    private Id3TagReader fetchId3Tags(String downloadUrl) {
+        final HttpGet get = new HttpGet(downloadUrl);
+        get.setHeader("Range", "bytes=0-" + (ID3_READ_BYTES - 1));
+
+        try (CloseableHttpResponse response = getHttpInterface().execute(get)) {
+            final int status = response.getStatusLine().getStatusCode();
+
+            // 206 = Partial Content (expected), 200 = server ignored Range header
+            if (status != 206 && status != 200) {
+                return new Id3TagReader();
+            }
+
+            try (InputStream stream = response.getEntity().getContent()) {
+                final byte[] buffer = new byte[ID3_READ_BYTES];
+                int totalRead = 0;
+                int read;
+
+                while (totalRead < ID3_READ_BYTES &&
+                       (read = stream.read(buffer, totalRead, ID3_READ_BYTES - totalRead)) != -1) {
+                    totalRead += read;
+                }
+
+                final byte[] data = totalRead == ID3_READ_BYTES
+                    ? buffer
+                    : Arrays.copyOf(buffer, totalRead);
+
+                return Id3TagReader.parse(data);
+            }
+        } catch (IOException e) {
+            // Non-critical: fall back to filename metadata
+            return new Id3TagReader();
+        }
+    }
+
+    /**
+     * Loads the Drive HTML page and extracts the filename from the <title> tag.
+     * Returns null if the file is private or not found.
      */
     private String fetchTitle(String id) throws IOException {
         final HttpGet get = new HttpGet(String.format(VIEW_URL_TEMPLATE, id));
@@ -181,34 +213,42 @@ public class GoogleDriveAudioSourceManager extends AbstractDuncteBotHttpSource {
         try (CloseableHttpResponse response = getHttpInterface().execute(get)) {
             final int status = response.getStatusLine().getStatusCode();
 
-            if (status == 404) {
-                return null;
-            }
-
-            if (status != 200) {
-                throw new IOException("Unexpected status from Drive view page: " + status);
-            }
+            if (status == 404) return null;
+            if (status != 200) throw new IOException("Unexpected status from Drive view page: " + status);
 
             final String html = IOUtils.toString(response.getEntity().getContent(), StandardCharsets.UTF_8);
 
-            // <title>filename.mp3 - Google Drive</title>
             final int titleStart = html.indexOf("<title>");
-            final int titleEnd = html.indexOf("</title>");
+            final int titleEnd   = html.indexOf("</title>");
 
-            if (titleStart == -1 || titleEnd == -1) {
-                return "Unknown title";
-            }
+            if (titleStart == -1 || titleEnd == -1) return "Unknown title";
 
             final String raw = html.substring(titleStart + 7, titleEnd).trim();
 
-            // Strip the " - Google Drive" suffix if present
             return raw.contains(" - Google Drive")
-                    ? raw.substring(0, raw.lastIndexOf(" - Google Drive")).trim()
-                    : raw;
+                ? raw.substring(0, raw.lastIndexOf(" - Google Drive")).trim()
+                : raw;
         }
     }
 
-    /** Returns the direct download URL for a given Drive file ID. */
+    /**
+     * Tries to split "Artist - Title.mp3" into ["Title", "Artist"].
+     * Falls back to [filename, "Google Drive"] if no " - " separator found.
+     */
+    private String[] parseArtistAndTitle(String filename) {
+        final String name = filename.replaceAll("(?i)\\.(mp3|mp4|m4a|ogg|wav|flac)$", "").trim();
+        final int sep = name.indexOf(" - ");
+
+        if (sep > 0) {
+            return new String[]{
+                name.substring(sep + 3).trim(),
+                name.substring(0, sep).trim()
+            };
+        }
+
+        return new String[]{name, "Google Drive"};
+    }
+
     public static String getDownloadUrl(String id) {
         return String.format(DOWNLOAD_TEMPLATE, id);
     }
@@ -222,7 +262,6 @@ public class GoogleDriveAudioSourceManager extends AbstractDuncteBotHttpSource {
 
     @Override
     public void encodeTrack(AudioTrack track, DataOutput output) throws IOException {
-        // Nothing to encode
     }
 
     @Override
