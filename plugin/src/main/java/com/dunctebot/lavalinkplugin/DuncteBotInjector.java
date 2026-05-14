@@ -30,7 +30,7 @@ public class DuncteBotInjector implements AudioPlayerManagerConfiguration {
     private final Logger logger = LoggerFactory.getLogger(DuncteBotInjector.class);
     private final Map<String, SourceManagerInfo> sourceManagers;
 
-    public DuncteBotInjector(DuncteBotConfig config, DuncteBotConfig.Sources sourcesConfig, DuncteBotConfig.Tumblr tumblrConfig) {
+    public DuncteBotInjector(DuncteBotConfig config, DuncteBotConfig.Sources sourcesConfig, DuncteBotConfig.Tumblr tumblrConfig, DuncteBotConfig.GoogleDrive googleDriveConfig) {
 
         this.sourceManagers = Map.ofEntries(
                 entry("yarn", new SourceManagerInfo(sourcesConfig::isGetyarn, GetyarnAudioSourceManager::new)),
@@ -43,7 +43,10 @@ public class DuncteBotInjector implements AudioPlayerManagerConfiguration {
                 entry("Soundgasm", new SourceManagerInfo(sourcesConfig::isSoundgasm, SoundGasmAudioSourceManager::new)),
                 entry("Elgato (.streamDeckAudio)", new SourceManagerInfo(sourcesConfig::isElgato, StreamDeckAudioSourceManager::new)),
                 entry("pixeldrain", new SourceManagerInfo(sourcesConfig::isPixeldrain, PixeldrainAudioSourceManager::new)),
-                entry("Google Drive", new SourceManagerInfo(sourcesConfig::isGoogledrive, GoogleDriveAudioSourceManager::new)),
+                entry("Google Drive", new SourceManagerInfo(
+                        sourcesConfig::isGoogledrive,
+                        () -> new GoogleDriveAudioSourceManager(googleDriveConfig.getDriveKey())
+                )),
                 entry("Text To Speech", new SourceManagerInfo(sourcesConfig::isTts, () -> {
                     final String lang = Objects.requireNonNullElse(config.getTtsLanguage(), "en-AU");
 
