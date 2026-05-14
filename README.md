@@ -14,7 +14,7 @@ Adding support for the following sources:
   - These files are only accepted over HTTP currently
 - Pixeldrain.com
 - Tumblr.com (when it does not throw a 403 your way)
-- Google Drive (public audio files, to enable `dvsearch:` set searchKey) (under development)
+- Google Drive (public audio files, to enable search by prefixing with `dvsearch:` set searchKey)(under development)
 
 ## Lavalink version compatibility
 
@@ -54,7 +54,7 @@ plugins:
         tumblr:
           consumerKey: "<YOUR tumblr consumer key>"
           secretKey: "<YOUR tumblr secret key>"
-        searchKey : "YOUR search key"
+        searchKey: "YOUR search key"
         sources:
             # true = source enabled, false = source disabled
             getyarn: true # www.getyarn.io
