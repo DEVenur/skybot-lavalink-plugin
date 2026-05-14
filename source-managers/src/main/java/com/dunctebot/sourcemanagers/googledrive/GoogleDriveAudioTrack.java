@@ -23,6 +23,7 @@ import com.sedmelluq.discord.lavaplayer.container.mpeg.MpegAudioTrack;
 import com.sedmelluq.discord.lavaplayer.container.ogg.OggAudioTrack;
 import com.sedmelluq.discord.lavaplayer.container.wav.WavAudioTrack;
 import com.sedmelluq.discord.lavaplayer.tools.FriendlyException;
+import com.sedmelluq.discord.lavaplayer.tools.Units;
 import com.sedmelluq.discord.lavaplayer.tools.io.SeekableInputStream;
 import com.sedmelluq.discord.lavaplayer.track.AudioTrackInfo;
 import com.sedmelluq.discord.lavaplayer.track.InternalAudioTrack;
@@ -31,6 +32,16 @@ public class GoogleDriveAudioTrack extends Mp3Track {
 
     public GoogleDriveAudioTrack(AudioTrackInfo trackInfo, AbstractDuncteBotHttpSource manager) {
         super(trackInfo, manager);
+    }
+
+    /**
+     * PersistentHttpStream uses this value as the content length in bytes.
+     * When CONTENT_LENGTH_UNKNOWN (-1) is passed, it closes the stream immediately.
+     * Long.MAX_VALUE tells it to read until EOF — correct behaviour for Drive files.
+     */
+    @Override
+    protected long getTrackDuration() {
+        return Long.MAX_VALUE;
     }
 
     @Override
@@ -51,9 +62,9 @@ public class GoogleDriveAudioTrack extends Mp3Track {
                 return new WavAudioTrack(trackInfo, stream);
             default:
                 throw new FriendlyException(
-                        "Unsupported audio format: " + mimeType,
-                        FriendlyException.Severity.COMMON,
-                        null
+                    "Unsupported audio format: " + mimeType,
+                    FriendlyException.Severity.COMMON,
+                    null
                 );
         }
     }
