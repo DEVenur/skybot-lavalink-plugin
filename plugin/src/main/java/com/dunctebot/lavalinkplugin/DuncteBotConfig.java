@@ -17,6 +17,20 @@ public class DuncteBotConfig {
     }
 
     @Component
+    @ConfigurationProperties(prefix = "plugins.dunctebot.googledrive")
+    public static class GoogleDrive {
+        private String driveKey = null;
+
+        public String getDriveKey() {
+            return driveKey;
+        }
+
+        public void setDriveKey(String driveKey) {
+            this.driveKey = driveKey;
+        }
+    }
+
+    @Component
     @ConfigurationProperties(prefix = "plugins.dunctebot.tumblr")
     public static class Tumblr {
         private String consumerKey = null;
@@ -56,108 +70,43 @@ public class DuncteBotConfig {
         private boolean tumblr = false;
         private boolean googledrive = true; // google drive audio files
 
-        public boolean isGetyarn() {
-            return getyarn;
-        }
+        public boolean isGetyarn() { return getyarn; }
+        public void setGetyarn(boolean getyarn) { this.getyarn = getyarn; }
 
-        public void setGetyarn(boolean getyarn) {
-            this.getyarn = getyarn;
-        }
+        public boolean isClypit() { return clypit; }
+        public void setClypit(boolean clypit) { this.clypit = clypit; }
 
-        public boolean isClypit() {
-            return clypit;
-        }
+        public boolean isTts() { return tts; }
+        public void setTts(boolean tts) { this.tts = tts; }
 
-        public void setClypit(boolean clypit) {
-            this.clypit = clypit;
-        }
+        public boolean isPornhub() { return pornhub; }
+        public void setPornhub(boolean pornhub) { this.pornhub = pornhub; }
 
-        public boolean isTts() {
-            return tts;
-        }
+        public boolean isReddit() { return reddit; }
+        public void setReddit(boolean reddit) { this.reddit = reddit; }
 
-        public void setTts(boolean tts) {
-            this.tts = tts;
-        }
+        public boolean isOcremix() { return ocremix; }
+        public void setOcremix(boolean ocremix) { this.ocremix = ocremix; }
 
-        public boolean isPornhub() {
-            return pornhub;
-        }
+        public boolean isTiktok() { return tiktok; }
+        public void setTiktok(boolean tiktok) { this.tiktok = tiktok; }
 
-        public void setPornhub(boolean pornhub) {
-            this.pornhub = pornhub;
-        }
+        public boolean isMixcloud() { return mixcloud; }
+        public void setMixcloud(boolean mixcloud) { this.mixcloud = mixcloud; }
 
-        public boolean isReddit() {
-            return reddit;
-        }
+        public boolean isSoundgasm() { return soundgasm; }
+        public void setSoundgasm(boolean soundgasm) { this.soundgasm = soundgasm; }
 
-        public void setReddit(boolean reddit) {
-            this.reddit = reddit;
-        }
+        public boolean isElgato() { return elgato; }
+        public void setElgato(boolean elgato) { this.elgato = elgato; }
 
-        public boolean isOcremix() {
-            return ocremix;
-        }
+        public boolean isPixeldrain() { return pixeldrain; }
+        public void setPixeldrain(boolean pixeldrain) { this.pixeldrain = pixeldrain; }
 
-        public void setOcremix(boolean ocremix) {
-            this.ocremix = ocremix;
-        }
+        public boolean isTumblr() { return tumblr; }
+        public void setTumblr(boolean tumblr) { this.tumblr = tumblr; }
 
-        public boolean isTiktok() {
-            return tiktok;
-        }
-
-        public void setTiktok(boolean tiktok) {
-            this.tiktok = tiktok;
-        }
-
-        public boolean isMixcloud() {
-            return mixcloud;
-        }
-
-        public void setMixcloud(boolean mixcloud) {
-            this.mixcloud = mixcloud;
-        }
-
-        public boolean isSoundgasm() {
-            return soundgasm;
-        }
-
-        public void setSoundgasm(boolean soundgasm) {
-            this.soundgasm = soundgasm;
-        }
-
-        public boolean isElgato() {
-            return elgato;
-        }
-
-        public void setElgato(boolean elgato) {
-            this.elgato = elgato;
-        }
-
-        public boolean isPixeldrain() {
-            return pixeldrain;
-        }
-
-        public void setPixeldrain(boolean pixeldrain) {
-            this.pixeldrain = pixeldrain;
-        }
-
-        public boolean isTumblr() {
-            return tumblr;
-        }
-
-        public void setTumblr(boolean tumblr) {
-            this.tumblr = tumblr;
-        }
-
-        public boolean isGoogledrive() {
-            return googledrive;
-        }
-
-        public void setGoogledrive(boolean googledrive) {
-            this.googledrive = googledrive;
-        }
+        public boolean isGoogledrive() { return googledrive; }
+        public void setGoogledrive(boolean googledrive) { this.googledrive = googledrive; }
     }
 }
