@@ -74,7 +74,7 @@ public class GoogleDriveAudioSourceManager extends AbstractDuncteBotHttpSource {
         "https?://drive\\.google\\.com/(?:file/d/([a-zA-Z0-9_-]+)|open\\?(?:.*&)?id=([a-zA-Z0-9_-]+))"
     );
 
-    private static final String DOWNLOAD_TEMPLATE  = "https://drive.google.com/uc?export=download&id=%s";
+    private static final String DOWNLOAD_TEMPLATE  = "https://drive.usercontent.google.com/download?id=%s&export=download&authuser=0";
     private static final String VIEW_URL_TEMPLATE  = "https://drive.google.com/file/d/%s/view";
     private static final String THUMBNAIL_TEMPLATE = "https://drive.google.com/thumbnail?id=%s&sz=w500";
 
