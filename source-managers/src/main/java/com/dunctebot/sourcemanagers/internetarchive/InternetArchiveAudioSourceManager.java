@@ -121,9 +121,19 @@ public class InternetArchiveAudioSourceManager extends AbstractDuncteBotHttpSour
 
         try {
             if (rawFile != null && !rawFile.isEmpty()) {
-                // Lavalink already decoded %2B → + before passing to loadItem.
-                // IA filenames use spaces, so we just replace + with space.
-                final String fileName = rawFile.replace("+", " ");
+                // Normalize the filename regardless of how the bot sent the URL:
+                // - %2B  → + (if bot sent literally %2B without Spring decoding)
+                // - +    → space (URL form-encoding convention for spaces)
+                // - %20  → space (standard percent-encoding for spaces)
+                // - %28/%29 → ( / ) (parens sometimes percent-encoded)
+                String fileName = rawFile;
+                fileName = fileName.replace("%2B", "+");   // %2B → +
+                fileName = fileName.replace("+", " ");      // + → space
+                fileName = fileName.replace("%20", " ");    // %20 → space
+                fileName = fileName.replace("%28", "(");    // %28 → (
+                fileName = fileName.replace("%29", ")");    // %29 → )
+                fileName = fileName.replace("%2C", ",");    // %2C → ,
+                fileName = fileName.replace("%27", "'");    // %27 → '
                 return buildTrackForFile(iaId, fileName);
             } else {
                 // Album/item URL — pick best audio file automatically
