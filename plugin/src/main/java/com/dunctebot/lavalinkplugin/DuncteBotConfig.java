@@ -69,6 +69,7 @@ public class DuncteBotConfig {
         private boolean pixeldrain = false;
         private boolean tumblr = false;
         private boolean googledrive = true; // google drive audio files
+        private boolean internetarchive = true; // archive.org
 
         public boolean isGetyarn() { return getyarn; }
         public void setGetyarn(boolean getyarn) { this.getyarn = getyarn; }
@@ -108,5 +109,8 @@ public class DuncteBotConfig {
 
         public boolean isGoogledrive() { return googledrive; }
         public void setGoogledrive(boolean googledrive) { this.googledrive = googledrive; }
-    }
+
+        public boolean isInternetarchive() { return internetarchive; }
+        public void setInternetarchive(boolean internetarchive) { this.internetarchive = internetarchive; }
+            }
 }
