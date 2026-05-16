@@ -33,6 +33,7 @@ import org.slf4j.LoggerFactory;
 import java.io.DataInput;
 import java.io.DataOutput;
 import java.io.IOException;
+import java.net.URLDecoder;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
@@ -44,16 +45,19 @@ public class InternetArchiveAudioSourceManager extends AbstractDuncteBotHttpSour
 
     private static final Logger log = LoggerFactory.getLogger(InternetArchiveAudioSourceManager.class);
 
-    // ── URL patterns ──────────────────────────────────────────────────────────
+    // ── URL pattern ───────────────────────────────────────────────────────────
 
     /**
+     * Group 1 = identifier (e.g. "King-Mathers")
+     * Group 2 = filename   (e.g. "04.+King+Mathers+(feat.+Cashis).mp3") — optional, URL-encoded
+     *
      * Matches:
      *   https://archive.org/details/IDENTIFIER
-     *   https://archive.org/details/IDENTIFIER/FILENAME (ignored — we pick best file via API)
-     *   https://archive.org/download/IDENTIFIER/FILENAME (direct link)
+     *   https://archive.org/details/IDENTIFIER/FILENAME
+     *   https://archive.org/download/IDENTIFIER/FILENAME
      */
     private static final Pattern IA_URL_PATTERN = Pattern.compile(
-        "https?://archive\\.org/(?:details|download)/([A-Za-z0-9._-]+)(?:/[^?#]*)?"
+        "https?://archive\\.org/(?:details|download)/([A-Za-z0-9._-]+)(?:/([^?#]+))?"
     );
 
     /** Search prefix: "iasearch:jazz piano" */
@@ -61,24 +65,24 @@ public class InternetArchiveAudioSourceManager extends AbstractDuncteBotHttpSour
 
     // ── API endpoints ─────────────────────────────────────────────────────────
 
-    private static final String METADATA_URL  = "https://archive.org/metadata/%s";
-    private static final String DOWNLOAD_URL  = "https://archive.org/download/%s/%s";
-    private static final String DETAILS_URL   = "https://archive.org/details/%s";
-    private static final String SEARCH_URL    = "https://archive.org/advancedsearch.php"
+    private static final String METADATA_URL = "https://archive.org/metadata/%s";
+    private static final String DOWNLOAD_URL = "https://archive.org/download/%s/%s";
+    private static final String DETAILS_URL  = "https://archive.org/details/%s";
+    private static final String SEARCH_URL   = "https://archive.org/advancedsearch.php"
         + "?q=%s+AND+mediatype%%3Aaudio"
         + "&fl[]=identifier&fl[]=title&fl[]=creator"
         + "&rows=5&output=json&page=1";
 
     /**
      * Audio format preference order — best first.
-     * Internet Archive "format" field values (case-insensitive prefix match).
+     * Used only when NO specific filename is given in the URL.
      */
     private static final List<String> FORMAT_PRIORITY = Arrays.asList(
-        "VBR MP3", "MP3", "128Kbps MP3", "64Kbps MP3",   // mp3 variants
-        "OGG VORBIS", "OGG",                               // ogg
-        "FLAC",                                            // flac
-        "MP4", "M4A", "AAC",                               // mpeg4
-        "WAV", "WAVE"                                      // wav
+        "VBR MP3", "MP3", "128Kbps MP3", "64Kbps MP3",
+        "OGG VORBIS", "OGG",
+        "FLAC",
+        "MP4", "M4A", "AAC",
+        "WAV", "WAVE"
     );
 
     // ── Source name ───────────────────────────────────────────────────────────
@@ -110,11 +114,22 @@ public class InternetArchiveAudioSourceManager extends AbstractDuncteBotHttpSour
         }
 
         // ── Direct URL branch ─────────────────────────────────────────────────
-        final String iaId = extractIdentifier(identifier);
-        if (iaId == null) return null;
+        final Matcher m = IA_URL_PATTERN.matcher(identifier);
+        if (!m.find()) return null;
+
+        final String iaId     = m.group(1);
+        final String rawFile  = m.group(2); // null when no filename in URL
 
         try {
-            return buildTrack(iaId);
+            if (rawFile != null && !rawFile.isEmpty()) {
+                // Specific file requested — decode URL encoding (+/% → spaces etc.)
+                final String fileName = URLDecoder.decode(rawFile.replace("+", "%2B"), StandardCharsets.UTF_8)
+                    .replace("%2B", "+"); // preserve literal + that were %2B
+                return buildTrackForFile(iaId, fileName);
+            } else {
+                // Album/item URL — pick best audio file automatically
+                return buildTrack(iaId);
+            }
         } catch (IOException e) {
             throw new FriendlyException(
                 "Could not load Internet Archive item",
@@ -152,15 +167,16 @@ public class InternetArchiveAudioSourceManager extends AbstractDuncteBotHttpSour
         return AudioReference.NO_TRACK;
     }
 
-    // ── Metadata + track building ─────────────────────────────────────────────
+    // ── Track building ────────────────────────────────────────────────────────
 
     /**
-     * Fetches archive.org/metadata/{id}, picks the best audio file from the listing,
-     * and returns an AudioTrackInfo.
+     * User specified a filename in the URL (e.g. /details/King-Mathers/04.+King+Mathers+....mp3).
+     * Fetch metadata, find that exact file, and build a track for it.
      */
-    private AudioItem buildTrack(String iaId) throws IOException {
-        final JsonBrowser meta = fetchJson(String.format(METADATA_URL, iaId));
+    private AudioItem buildTrackForFile(String iaId, String requestedFileName) throws IOException {
+        log.info("IA: loading specific file '{}' from '{}'", requestedFileName, iaId);
 
+        final JsonBrowser meta = fetchJson(String.format(METADATA_URL, iaId));
         if (meta == null || meta.isNull()) {
             throw new FriendlyException(
                 "Internet Archive item not found: " + iaId,
@@ -168,15 +184,50 @@ public class InternetArchiveAudioSourceManager extends AbstractDuncteBotHttpSour
             );
         }
 
-        // ── title and author ─────────────────────────────────────────────────
         final JsonBrowser metadata = meta.get("metadata");
         String title  = metadata.get("title").text();
         String author = metadata.get("creator").text();
-
         if (title  == null || title.isEmpty())  title  = iaId;
         if (author == null || author.isEmpty()) author = "Internet Archive";
 
-        // ── pick best audio file ──────────────────────────────────────────────
+        // Find the exact file by name (case-insensitive for safety)
+        JsonBrowser matchedFile = null;
+        for (final JsonBrowser file : meta.get("files").values()) {
+            final String name = file.get("name").text();
+            if (name != null && name.equalsIgnoreCase(requestedFileName)) {
+                matchedFile = file;
+                break;
+            }
+        }
+
+        if (matchedFile == null) {
+            throw new FriendlyException(
+                "File '" + requestedFileName + "' not found in Internet Archive item: " + iaId,
+                FriendlyException.Severity.COMMON, null
+            );
+        }
+
+        return buildTrackFromFile(iaId, matchedFile, title, author);
+    }
+
+    /**
+     * No specific file requested — fetch metadata, pick the best audio file automatically.
+     */
+    private AudioItem buildTrack(String iaId) throws IOException {
+        final JsonBrowser meta = fetchJson(String.format(METADATA_URL, iaId));
+        if (meta == null || meta.isNull()) {
+            throw new FriendlyException(
+                "Internet Archive item not found: " + iaId,
+                FriendlyException.Severity.COMMON, null
+            );
+        }
+
+        final JsonBrowser metadata = meta.get("metadata");
+        String title  = metadata.get("title").text();
+        String author = metadata.get("creator").text();
+        if (title  == null || title.isEmpty())  title  = iaId;
+        if (author == null || author.isEmpty()) author = "Internet Archive";
+
         final JsonBrowser files = meta.get("files");
         if (files.isNull() || files.values().isEmpty()) {
             throw new FriendlyException(
@@ -187,11 +238,9 @@ public class InternetArchiveAudioSourceManager extends AbstractDuncteBotHttpSour
 
         JsonBrowser bestFile = null;
         int bestPriority = Integer.MAX_VALUE;
-
         for (final JsonBrowser file : files.values()) {
             final String format = file.get("format").text();
             if (format == null) continue;
-
             final int priority = formatPriority(format);
             if (priority < bestPriority) {
                 bestPriority = priority;
@@ -206,25 +255,30 @@ public class InternetArchiveAudioSourceManager extends AbstractDuncteBotHttpSour
             );
         }
 
-        // ── file metadata ─────────────────────────────────────────────────────
-        final String fileName = bestFile.get("name").text();
-        final String format   = bestFile.get("format").text();
+        return buildTrackFromFile(iaId, bestFile, title, author);
+    }
 
-        // Per-file title/creator override if present
-        final String fileTitle  = bestFile.get("title").text();
-        final String fileAuthor = bestFile.get("creator").text();
-        if (fileTitle  != null && !fileTitle.isEmpty())  title  = fileTitle;
-        if (fileAuthor != null && !fileAuthor.isEmpty()) author = fileAuthor;
+    /**
+     * Shared logic: given an IA item id, a file JsonBrowser node, and album-level
+     * title/author, build and return an InternetArchiveAudioTrack.
+     */
+    private AudioItem buildTrackFromFile(String iaId, JsonBrowser file, String albumTitle, String albumAuthor) {
+        final String fileName = file.get("name").text();
+        final String format   = file.get("format").text();
 
-        // Duration: IA "length" is in seconds (float string), convert to ms
-        long durationMs = 0;
-        final String lengthStr = bestFile.get("length").text();
+        // Per-file title/creator override if present in metadata
+        final String fileTitle  = file.get("title").text();
+        final String fileAuthor = file.get("creator").text();
+        final String title  = (fileTitle  != null && !fileTitle.isEmpty())  ? fileTitle  : albumTitle;
+        final String author = (fileAuthor != null && !fileAuthor.isEmpty()) ? fileAuthor : albumAuthor;
+
+        // Duration: IA "length" is in seconds (float string)
+        long durationMs = Long.MAX_VALUE;
+        final String lengthStr = file.get("length").text();
         if (lengthStr != null) {
             try {
                 durationMs = Math.round(Double.parseDouble(lengthStr) * 1000.0);
-            } catch (NumberFormatException ignored) {
-                // leave as 0 → LavaPlayer will stream without known duration
-            }
+            } catch (NumberFormatException ignored) { }
         }
 
         final String streamUrl  = String.format(DOWNLOAD_URL, iaId, urlEncodeFileName(fileName));
@@ -236,11 +290,11 @@ public class InternetArchiveAudioSourceManager extends AbstractDuncteBotHttpSour
         final AudioTrackInfo trackInfo = new AudioTrackInfo(
             title,
             author,
-            durationMs > 0 ? durationMs : Long.MAX_VALUE,
-            streamUrl,   // identifier = the direct stream URL
+            durationMs,
+            streamUrl,   // identifier = direct stream URL
             false,
             detailsUrl,
-            null,        // no thumbnail — archive.org has no reliable cover API
+            null,
             null
         );
 
@@ -249,43 +303,25 @@ public class InternetArchiveAudioSourceManager extends AbstractDuncteBotHttpSour
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
-    private String extractIdentifier(String url) {
-        final Matcher m = IA_URL_PATTERN.matcher(url);
-        return m.find() ? m.group(1) : null;
-    }
-
-    /**
-     * Returns the priority index of a given IA format string.
-     * Lower = more preferred. Integer.MAX_VALUE = unsupported.
-     */
     private int formatPriority(String format) {
         final String upper = format.toUpperCase();
         for (int i = 0; i < FORMAT_PRIORITY.size(); i++) {
             if (upper.contains(FORMAT_PRIORITY.get(i))) return i;
         }
-        return Integer.MAX_VALUE; // unsupported format
+        return Integer.MAX_VALUE;
     }
 
-    /**
-     * Maps an IA format string to a MIME type string used by InternetArchiveAudioTrack.
-     */
     public static String formatToMime(String format) {
         if (format == null) return "audio/mpeg";
         final String upper = format.toUpperCase();
-
-        if (upper.contains("MP3")) return "audio/mpeg";
-        if (upper.contains("OGG")) return "audio/ogg";
+        if (upper.contains("MP3"))  return "audio/mpeg";
+        if (upper.contains("OGG"))  return "audio/ogg";
         if (upper.contains("FLAC")) return "audio/flac";
         if (upper.contains("MP4") || upper.contains("M4A") || upper.contains("AAC")) return "audio/mp4";
-        if (upper.contains("WAV")) return "audio/wav";
-
-        return "audio/mpeg"; // safe default
+        if (upper.contains("WAV"))  return "audio/wav";
+        return "audio/mpeg";
     }
 
-    /**
-     * URL-encodes a filename but preserves slashes and dots.
-     * IA filenames can contain spaces — these must be percent-encoded.
-     */
     private static String urlEncodeFileName(String name) {
         return URLEncoder.encode(name, StandardCharsets.UTF_8).replace("+", "%20");
     }
@@ -297,9 +333,7 @@ public class InternetArchiveAudioSourceManager extends AbstractDuncteBotHttpSour
         try (CloseableHttpResponse response = getHttpInterface().execute(get)) {
             final int status = response.getStatusLine().getStatusCode();
             if (status == 404) return null;
-            if (status != 200) {
-                throw new IOException("Unexpected status " + status + " from " + url);
-            }
+            if (status != 200) throw new IOException("Unexpected status " + status + " from " + url);
             final String body = IOUtils.toString(response.getEntity().getContent(), StandardCharsets.UTF_8);
             return JsonBrowser.parse(body);
         }
@@ -308,17 +342,13 @@ public class InternetArchiveAudioSourceManager extends AbstractDuncteBotHttpSour
     // ── LavaPlayer boilerplate ────────────────────────────────────────────────
 
     @Override
-    public boolean isTrackEncodable(AudioTrack track) {
-        return false;
-    }
+    public boolean isTrackEncodable(AudioTrack track) { return false; }
 
     @Override
-    public void encodeTrack(AudioTrack track, DataOutput output) throws IOException {
-    }
+    public void encodeTrack(AudioTrack track, DataOutput output) throws IOException { }
 
     @Override
     public AudioTrack decodeTrack(AudioTrackInfo trackInfo, DataInput input) throws IOException {
-        // mimeType not persisted; default to mp3 on decode
         return new InternetArchiveAudioTrack(trackInfo, "audio/mpeg", this);
     }
 }
