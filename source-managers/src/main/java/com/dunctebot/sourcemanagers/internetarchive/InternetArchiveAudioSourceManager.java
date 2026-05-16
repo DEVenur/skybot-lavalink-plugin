@@ -33,7 +33,6 @@ import org.slf4j.LoggerFactory;
 import java.io.DataInput;
 import java.io.DataOutput;
 import java.io.IOException;
-import java.net.URLDecoder;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
@@ -122,9 +121,9 @@ public class InternetArchiveAudioSourceManager extends AbstractDuncteBotHttpSour
 
         try {
             if (rawFile != null && !rawFile.isEmpty()) {
-                // Specific file requested — decode URL encoding (+/% → spaces etc.)
-                final String fileName = URLDecoder.decode(rawFile.replace("+", "%2B"), StandardCharsets.UTF_8)
-                    .replace("%2B", "+"); // preserve literal + that were %2B
+                // Lavalink already decoded %2B → + before passing to loadItem.
+                // IA filenames use spaces, so we just replace + with space.
+                final String fileName = rawFile.replace("+", " ");
                 return buildTrackForFile(iaId, fileName);
             } else {
                 // Album/item URL — pick best audio file automatically
