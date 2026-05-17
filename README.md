@@ -15,7 +15,7 @@ Adding support for the following sources:
 - Pixeldrain.com
 - Tumblr.com (when it does not throw a 403 your way)
 - Google Drive (public audio files, to enable search by prefixing with `dvsearch:` set driveKey)
-- Internet Archive Audio (search by prefixing with `iasearch:`)(under development)
+- Internet Archive Audio (search by prefixing with `iasearch:`)
    
 ## Lavalink version compatibility
 
