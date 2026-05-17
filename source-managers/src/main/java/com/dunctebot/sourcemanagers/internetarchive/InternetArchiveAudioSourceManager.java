@@ -66,7 +66,8 @@ public class InternetArchiveAudioSourceManager extends AbstractDuncteBotHttpSour
 
     private static final String METADATA_URL = "https://archive.org/metadata/%s";
     private static final String DOWNLOAD_URL = "https://archive.org/download/%s/%s";
-    private static final String DETAILS_URL  = "https://archive.org/details/%s";
+    private static final String DETAILS_URL   = "https://archive.org/details/%s";
+    private static final String THUMBNAIL_URL = "https://archive.org/services/img/%s";
     private static final String SEARCH_URL   = "https://archive.org/advancedsearch.php"
         + "?q=%s+AND+mediatype%%3Aaudio"
         + "&fl[]=identifier&fl[]=title&fl[]=creator"
@@ -290,9 +291,10 @@ public class InternetArchiveAudioSourceManager extends AbstractDuncteBotHttpSour
             } catch (NumberFormatException ignored) { }
         }
 
-        final String streamUrl  = String.format(DOWNLOAD_URL, iaId, urlEncodeFileName(fileName));
-        final String detailsUrl = String.format(DETAILS_URL, iaId);
-        final String mimeType   = formatToMime(format);
+        final String streamUrl    = String.format(DOWNLOAD_URL, iaId, urlEncodeFileName(fileName));
+        final String detailsUrl   = String.format(DETAILS_URL, iaId);
+        final String thumbnailUrl = String.format(THUMBNAIL_URL, iaId);
+        final String mimeType     = formatToMime(format);
 
         log.info("IA: resolved {} → {} ({})", iaId, fileName, mimeType);
 
@@ -303,7 +305,7 @@ public class InternetArchiveAudioSourceManager extends AbstractDuncteBotHttpSour
             streamUrl,   // identifier = direct stream URL
             false,
             detailsUrl,
-            null,
+            thumbnailUrl,
             null
         );
 
