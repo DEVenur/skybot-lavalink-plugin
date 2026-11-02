@@ -29,6 +29,9 @@ import com.sedmelluq.discord.lavaplayer.track.AudioTrackInfo;
 import com.sedmelluq.discord.lavaplayer.track.InternalAudioTrack;
 import com.sedmelluq.discord.lavaplayer.track.playback.LocalAudioTrackExecutor;
 
+import java.net.URI;
+import java.util.Locale;
+
 import static com.sedmelluq.discord.lavaplayer.tools.FriendlyException.Severity.SUSPICIOUS;
 
 public class TikTokAudioTrack extends MpegTrack {
@@ -45,18 +48,18 @@ public class TikTokAudioTrack extends MpegTrack {
     }
 
     @Override
-    public String getPlaybackUrl() {
+    public synchronized String getPlaybackUrl() {
         try {
 
             if (urlCache == null) {
                 urlCache = loadPlaybackUrl();
             }
 
-            if (failedOnce) {
-                return urlCache.getRight();
+            String playbackUrl = failedOnce ? urlCache.getRight() : urlCache.getLeft();
+            if (playbackUrl == null || playbackUrl.isBlank()) {
+                throw new FriendlyException("TikTok did not provide an alternative audio URL", SUSPICIOUS, null);
             }
-
-            return urlCache.getLeft();
+            return playbackUrl;
 
         } catch (Exception e) {
             throw new FriendlyException("Could not load TikTok video", SUSPICIOUS, e);
@@ -83,12 +86,15 @@ public class TikTokAudioTrack extends MpegTrack {
                 throw firstFailure;
             }
 
-            failedOnce = true;
-
             if (urlCache == null) {
                 urlCache = loadPlaybackUrl();
             }
 
+            if (urlCache.getRight() == null || urlCache.getRight().isBlank()) {
+                throw firstFailure;
+            }
+
+            failedOnce = true;
             super.loadStream(executor, httpInterface);
         }
     }
@@ -101,7 +107,7 @@ public class TikTokAudioTrack extends MpegTrack {
                         trackInfo.identifier
                 );
 
-        if (metadata == null || metadata.videoUrl == null) {
+        if (metadata == null || metadata.videoUrl == null || metadata.videoUrl.isBlank()) {
             throw new FriendlyException("TikTok metadata extraction failed", SUSPICIOUS, null);
         }
 
@@ -114,11 +120,24 @@ public class TikTokAudioTrack extends MpegTrack {
     @Override
     protected InternalAudioTrack createAudioTrack(AudioTrackInfo trackInfo, SeekableInputStream stream) {
 
-        if (failedOnce && urlCache != null && urlCache.getRight() != null && urlCache.getRight().contains(".mp3")) {
+        if (failedOnce && urlCache != null && isMp3Url(urlCache.getRight())) {
             return new Mp3AudioTrack(trackInfo, stream);
         }
 
         return super.createAudioTrack(trackInfo, stream);
+    }
+
+    private static boolean isMp3Url(String value) {
+        if (value == null || value.isBlank()) {
+            return false;
+        }
+
+        try {
+            String path = URI.create(value).getPath();
+            return path != null && path.toLowerCase(Locale.ROOT).endsWith(".mp3");
+        } catch (IllegalArgumentException ignored) {
+            return value.toLowerCase(Locale.ROOT).matches(".*\\.mp3(?:[?#].*)?$");
+        }
     }
 
     @Override
