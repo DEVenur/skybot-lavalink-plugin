@@ -35,6 +35,7 @@ dependencies {
 
     testImplementation(libs.lavaplayer)
     testImplementation(libs.logger.impl)
+    testImplementation("org.junit.jupiter:junit-jupiter:5.10.2")
 }
 
 configure<JavaPluginExtension> {
