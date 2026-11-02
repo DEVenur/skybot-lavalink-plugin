@@ -33,6 +33,7 @@ import org.slf4j.LoggerFactory;
 import java.io.DataInput;
 import java.io.DataOutput;
 import java.io.IOException;
+import java.net.URLDecoder;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
@@ -71,7 +72,9 @@ public class InternetArchiveAudioSourceManager extends AbstractDuncteBotHttpSour
     private static final String SEARCH_URL   = "https://archive.org/advancedsearch.php"
         + "?q=%s+AND+mediatype%%3Aaudio"
         + "&fl[]=identifier&fl[]=title&fl[]=creator"
-        + "&rows=5&output=json&page=1";
+        + "&rows=10&output=json&page=%d";
+
+    private static final int SEARCH_MAX_PAGES = 3;
 
     /**
      * Audio format preference order — best first.
@@ -122,19 +125,12 @@ public class InternetArchiveAudioSourceManager extends AbstractDuncteBotHttpSour
 
         try {
             if (rawFile != null && !rawFile.isEmpty()) {
-                // Normalize the filename regardless of how the bot sent the URL:
-                // - %2B  → + (if bot sent literally %2B without Spring decoding)
-                // - +    → space (URL form-encoding convention for spaces)
-                // - %20  → space (standard percent-encoding for spaces)
-                // - %28/%29 → ( / ) (parens sometimes percent-encoded)
-                String fileName = rawFile;
-                fileName = fileName.replace("%2B", "+");   // %2B → +
-                fileName = fileName.replace("+", " ");      // + → space
-                fileName = fileName.replace("%20", " ");    // %20 → space
-                fileName = fileName.replace("%28", "(");    // %28 → (
-                fileName = fileName.replace("%29", ")");    // %29 → )
-                fileName = fileName.replace("%2C", ",");    // %2C → ,
-                fileName = fileName.replace("%27", "'");    // %27 → '
+                // Archive.org links commonly use '+' for spaces. Protect encoded
+                // %2B first so a literal plus sign survives URL decoding.
+                final String fileName = URLDecoder.decode(
+                    rawFile.replace("+", "%20"),
+                    StandardCharsets.UTF_8
+                );
                 return buildTrackForFile(iaId, fileName);
             } else {
                 // Album/item URL — pick best audio file automatically
@@ -151,26 +147,28 @@ public class InternetArchiveAudioSourceManager extends AbstractDuncteBotHttpSour
     // ── Search ────────────────────────────────────────────────────────────────
 
     private AudioItem search(String query) throws IOException {
-        final String url = String.format(
-            SEARCH_URL,
-            URLEncoder.encode(query, StandardCharsets.UTF_8)
-        );
+        final String encodedQuery = URLEncoder.encode(query, StandardCharsets.UTF_8);
 
-        final JsonBrowser response = fetchJson(url);
-        if (response == null || response.isNull()) return AudioReference.NO_TRACK;
+        // Try a few result pages so an item without a supported audio file does
+        // not prevent a later matching item from being selected.
+        for (int page = 1; page <= SEARCH_MAX_PAGES; page++) {
+            final String url = String.format(SEARCH_URL, encodedQuery, page);
+            final JsonBrowser response = fetchJson(url);
+            if (response == null || response.isNull()) return AudioReference.NO_TRACK;
 
-        final JsonBrowser docs = response.get("response").get("docs");
-        if (docs.isNull() || docs.values().isEmpty()) return AudioReference.NO_TRACK;
+            final JsonBrowser docs = response.get("response").get("docs");
+            if (docs.isNull() || docs.values().isEmpty()) break;
 
-        for (final JsonBrowser doc : docs.values()) {
-            final String iaId = doc.get("identifier").text();
-            if (iaId == null || iaId.isEmpty()) continue;
+            for (final JsonBrowser doc : docs.values()) {
+                final String iaId = doc.get("identifier").text();
+                if (iaId == null || iaId.isEmpty()) continue;
 
-            try {
-                final AudioItem item = buildTrack(iaId);
-                if (item != null) return item;
-            } catch (FriendlyException | IOException e) {
-                log.debug("IA search: skipping {} — {}", iaId, e.getMessage());
+                try {
+                    final AudioItem item = buildTrack(iaId);
+                    if (item != null) return item;
+                } catch (FriendlyException | IOException e) {
+                    log.debug("IA search: skipping {} — {}", iaId, e.getMessage());
+                }
             }
         }
 
@@ -294,7 +292,10 @@ public class InternetArchiveAudioSourceManager extends AbstractDuncteBotHttpSour
         final String streamUrl    = String.format(DOWNLOAD_URL, iaId, urlEncodeFileName(fileName));
         final String detailsUrl   = String.format(DETAILS_URL, iaId);
         final String thumbnailUrl = String.format(THUMBNAIL_URL, iaId);
-        final String mimeType     = formatToMime(format);
+        final String mimeType     = formatToMime(format, fileName);
+
+        // The API's "size" is bytes; "length" above is playback duration in seconds.
+        final long contentLength = parsePositiveLong(file.get("size").text(), Long.MAX_VALUE);
 
         log.info("IA: resolved {} → {} ({})", iaId, fileName, mimeType);
 
@@ -309,7 +310,7 @@ public class InternetArchiveAudioSourceManager extends AbstractDuncteBotHttpSour
             null
         );
 
-        return new InternetArchiveAudioTrack(trackInfo, mimeType, this);
+        return new InternetArchiveAudioTrack(trackInfo, mimeType, contentLength, this);
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
@@ -319,18 +320,45 @@ public class InternetArchiveAudioSourceManager extends AbstractDuncteBotHttpSour
         for (int i = 0; i < FORMAT_PRIORITY.size(); i++) {
             if (upper.contains(FORMAT_PRIORITY.get(i))) return i;
         }
+        // Some IA records use a generic format label but still expose a useful
+        // filename extension. Keep unsupported formats out of the candidates.
         return Integer.MAX_VALUE;
     }
 
     public static String formatToMime(String format) {
-        if (format == null) return "audio/mpeg";
-        final String upper = format.toUpperCase();
-        if (upper.contains("MP3"))  return "audio/mpeg";
-        if (upper.contains("OGG"))  return "audio/ogg";
+        return formatToMime(format, null);
+    }
+
+    private static String formatToMime(String format, String fileName) {
+        final String upper = format == null ? "" : format.toUpperCase();
+
+        if (upper.contains("MP3") || upper.contains("MPEG3")) return "audio/mpeg";
+        if (upper.contains("OGG") || upper.contains("VORBIS") || upper.contains("OPUS")) return "audio/ogg";
         if (upper.contains("FLAC")) return "audio/flac";
-        if (upper.contains("MP4") || upper.contains("M4A") || upper.contains("AAC")) return "audio/mp4";
-        if (upper.contains("WAV"))  return "audio/wav";
-        return "audio/mpeg";
+        if (upper.contains("MP4") || upper.contains("MPEG4") || upper.contains("M4A")
+            || upper.contains("AAC") || upper.contains("MPEG-4")) return "audio/mp4";
+        if (upper.contains("WAV") || upper.contains("WAVE")) return "audio/wav";
+
+        if (fileName != null) {
+            final String name = fileName.toLowerCase();
+            if (name.endsWith(".mp3")) return "audio/mpeg";
+            if (name.endsWith(".ogg") || name.endsWith(".oga") || name.endsWith(".opus")) return "audio/ogg";
+            if (name.endsWith(".flac")) return "audio/flac";
+            if (name.endsWith(".mp4") || name.endsWith(".m4a") || name.endsWith(".aac")) return "audio/mp4";
+            if (name.endsWith(".wav")) return "audio/wav";
+        }
+
+        return null;
+    }
+
+    private static long parsePositiveLong(String value, long fallback) {
+        if (value == null) return fallback;
+        try {
+            final long parsed = Long.parseLong(value);
+            return parsed > 0 ? parsed : fallback;
+        } catch (NumberFormatException ignored) {
+            return fallback;
+        }
     }
 
     private static String urlEncodeFileName(String name) {
