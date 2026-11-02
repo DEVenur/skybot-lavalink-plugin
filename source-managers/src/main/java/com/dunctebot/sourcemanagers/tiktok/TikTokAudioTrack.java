@@ -101,11 +101,10 @@ public class TikTokAudioTrack extends MpegTrack {
 
     protected Pair<String, String> loadPlaybackUrl() throws Exception {
 
-        TikTokAudioSourceManager.MetaData metadata =
-                getSourceManager().extractData(
-                        trackInfo.author,
-                        trackInfo.identifier
-                );
+        String pageUrl = trackInfo.uri;
+        TikTokAudioSourceManager.MetaData metadata = pageUrl != null && !pageUrl.isBlank()
+                ? getSourceManager().extractData(pageUrl)
+                : getSourceManager().extractData(trackInfo.author, trackInfo.identifier);
 
         if (metadata == null || metadata.videoUrl == null || metadata.videoUrl.isBlank()) {
             throw new FriendlyException("TikTok metadata extraction failed", SUSPICIOUS, null);
