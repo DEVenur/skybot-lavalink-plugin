@@ -35,6 +35,11 @@ import org.apache.http.client.methods.HttpGet;
 import java.io.DataInput;
 import java.io.DataOutput;
 import java.io.IOException;
+import java.net.URI;
+import java.net.URLEncoder;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -46,11 +51,59 @@ public class TikTokAudioSourceManager extends AbstractDuncteBotHttpSource {
     private final TikTokAudioTrackHttpManager httpManager = new TikTokAudioTrackHttpManager();
 
     private static final Pattern VIDEO_REGEX = Pattern.compile(
-            "https://(?:www\\.|m\\.)?tiktok\\.com/@(?<user>[^/]+)/video/(?<video>[0-9]+)"
+            "https?://(?:www\\.|m\\.)?tiktok\\.com/@(?<user>[^/?#]+)/video/(?<video>[0-9]+)(?:[/?#].*)?",
+            Pattern.CASE_INSENSITIVE
     );
+    private static final Pattern SHORT_URL_REGEX = Pattern.compile(
+            "https?://(?:vm|vt)\\.tiktok\\.com/[^/?#]+/?(?:[?#].*)?",
+            Pattern.CASE_INSENSITIVE
+    );
+    private static final HttpClient REDIRECT_CLIENT = HttpClient.newBuilder()
+            .connectTimeout(java.time.Duration.ofSeconds(10))
+            .followRedirects(HttpClient.Redirect.NORMAL)
+            .build();
 
     public TikTokAudioSourceManager() {
         super(false);
+    }
+
+    static String normalizeVideoUrl(String input) throws Exception {
+        if (input == null || input.isBlank()) {
+            return null;
+        }
+
+        String trimmed = input.trim();
+        Matcher direct = VIDEO_REGEX.matcher(trimmed);
+        if (direct.matches()) {
+            return "https://www.tiktok.com/@" + direct.group("user") + "/video/" + direct.group("video");
+        }
+
+        if (!SHORT_URL_REGEX.matcher(trimmed).matches()) {
+            return null;
+        }
+
+        HttpRequest request = HttpRequest.newBuilder(URI.create(trimmed))
+                .timeout(java.time.Duration.ofSeconds(15))
+                .header("User-Agent", "Mozilla/5.0")
+                .GET()
+                .build();
+        HttpResponse<Void> response = REDIRECT_CLIENT.send(
+                request,
+                HttpResponse.BodyHandlers.discarding()
+        );
+
+        Matcher redirected = VIDEO_REGEX.matcher(response.uri().toString());
+        if (!redirected.find()) {
+            return null;
+        }
+
+        return "https://www.tiktok.com/@" + redirected.group("user") + "/video/" + redirected.group("video");
+    }
+
+    @Override
+    public void shutdown() {
+        ExceptionTools.closeWithWarnings(httpManager);
+        super.shutdown();
     }
 
     @Override
@@ -61,9 +114,23 @@ public class TikTokAudioSourceManager extends AbstractDuncteBotHttpSource {
     @Override
     public AudioItem loadItem(AudioPlayerManager manager, AudioReference reference) {
 
-        Matcher matcher = VIDEO_REGEX.matcher(reference.identifier);
+        String normalizedUrl;
+        try {
+            normalizedUrl = normalizeVideoUrl(reference.identifier);
+        } catch (Exception e) {
+            throw ExceptionTools.wrapUnfriendlyExceptions(
+                    "Could not resolve TikTok URL",
+                    Severity.SUSPICIOUS,
+                    e
+            );
+        }
 
-        if (!matcher.find()) {
+        if (normalizedUrl == null) {
+            return null;
+        }
+
+        Matcher matcher = VIDEO_REGEX.matcher(normalizedUrl);
+        if (!matcher.matches()) {
             return null;
         }
 
@@ -118,7 +185,8 @@ public class TikTokAudioSourceManager extends AbstractDuncteBotHttpSource {
 
     protected MetaData extractData(String url) throws Exception {
 
-        String api = "https://www.tikwm.com/api/?url=" + url;
+        String encodedUrl = URLEncoder.encode(url, StandardCharsets.UTF_8);
+        String api = "https://www.tikwm.com/api/?url=" + encodedUrl;
 
         HttpGet request = new HttpGet(api);
         fakeChrome(request);
@@ -154,6 +222,21 @@ public class TikTokAudioSourceManager extends AbstractDuncteBotHttpSource {
 
             meta.musicUrl = data.get("music").safeText();
             meta.uniqueId = data.get("author").get("unique_id").safeText();
+
+            if (meta.videoId.isBlank() || meta.videoUrl.isBlank()) {
+                throw new FriendlyException(
+                        "TikTok API response is missing the video ID or playback URL",
+                        Severity.SUSPICIOUS,
+                        null
+                );
+            }
+
+            if (meta.title.isBlank()) {
+                meta.title = "TikTok video";
+            }
+            if (meta.uniqueId.isBlank()) {
+                meta.uniqueId = "TikTok";
+            }
 
             return meta;
         }
