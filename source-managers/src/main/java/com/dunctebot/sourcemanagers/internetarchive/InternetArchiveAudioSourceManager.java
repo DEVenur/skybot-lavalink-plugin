@@ -405,6 +405,6 @@ public class InternetArchiveAudioSourceManager extends AbstractDuncteBotHttpSour
 
     @Override
     public AudioTrack decodeTrack(AudioTrackInfo trackInfo, DataInput input) throws IOException {
-        return new InternetArchiveAudioTrack(trackInfo, "audio/mpeg", this);
+        return new InternetArchiveAudioTrack(trackInfo, "audio/mpeg", Long.MAX_VALUE, this);
     }
 }
