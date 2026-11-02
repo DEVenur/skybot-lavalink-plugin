@@ -43,6 +43,10 @@ configure<JavaPluginExtension> {
     targetCompatibility = JavaVersion.VERSION_11
 }
 
+tasks.withType<Test>().configureEach {
+    useJUnitPlatform()
+}
+
 val jar: Jar by tasks
 val build: Task by tasks
 val clean: Task by tasks
