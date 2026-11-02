@@ -249,7 +249,7 @@ public class InternetArchiveAudioSourceManager extends AbstractDuncteBotHttpSour
         for (final JsonBrowser file : files.values()) {
             final String format = file.get("format").text();
             if (format == null) continue;
-            final int priority = formatPriority(format);
+            final int priority = formatPriority(format, file.get("name").text());
             if (priority < bestPriority) {
                 bestPriority = priority;
                 bestFile = file;
@@ -293,6 +293,12 @@ public class InternetArchiveAudioSourceManager extends AbstractDuncteBotHttpSour
         final String detailsUrl   = String.format(DETAILS_URL, iaId);
         final String thumbnailUrl = String.format(THUMBNAIL_URL, iaId);
         final String mimeType     = formatToMime(format, fileName);
+        if (mimeType == null) {
+            throw new FriendlyException(
+                "Unsupported Internet Archive audio format: " + format + " (" + fileName + ")",
+                FriendlyException.Severity.COMMON, null
+            );
+        }
 
         // The API's "size" is bytes; "length" above is playback duration in seconds.
         final long contentLength = parsePositiveLong(file.get("size").text(), Long.MAX_VALUE);
@@ -315,13 +321,24 @@ public class InternetArchiveAudioSourceManager extends AbstractDuncteBotHttpSour
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
-    private int formatPriority(String format) {
-        final String upper = format.toUpperCase();
+    private int formatPriority(String format, String fileName) {
+        final String upper = format == null ? "" : format.toUpperCase();
         for (int i = 0; i < FORMAT_PRIORITY.size(); i++) {
             if (upper.contains(FORMAT_PRIORITY.get(i))) return i;
         }
-        // Some IA records use a generic format label but still expose a useful
-        // filename extension. Keep unsupported formats out of the candidates.
+
+        // Fall back to the extension when IA uses a generic or missing format label.
+        if (fileName != null) {
+            final String name = fileName.toLowerCase();
+            if (name.endsWith(".mp3")) return 1;
+            if (name.endsWith(".ogg") || name.endsWith(".oga") || name.endsWith(".opus")) return 4;
+            if (name.endsWith(".flac")) return 6;
+            if (name.endsWith(".mp4")) return 7;
+            if (name.endsWith(".m4a")) return 8;
+            if (name.endsWith(".aac")) return 9;
+            if (name.endsWith(".wav")) return 10;
+        }
+
         return Integer.MAX_VALUE;
     }
 
