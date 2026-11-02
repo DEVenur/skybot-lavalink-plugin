@@ -59,7 +59,9 @@ public class Id3TagReader {
             final int extSize = version == 4
                     ? decodeSyncsafe(data, pos)
                     : readInt(data, pos);
-            pos += extSize;
+            // ID3v2.3 stores the extended-header size excluding its 4-byte size field;
+            // ID3v2.4 includes the size field in the syncsafe size.
+            pos += version == 3 ? extSize + 4 : extSize;
         }
 
         final int end = Math.min(headerSize + tagSize, data.length);
