@@ -163,15 +163,14 @@ public class GoogleDriveAudioSourceManager extends AbstractDuncteBotHttpSource {
     private AudioItem searchDrive(String query) throws IOException {
         final String driveQuery = String.format(
             "fullText contains '%s' and mimeType contains 'audio/' and visibility = 'anyoneCanFind'",
-            query.replace("\\\\", "\\\\\\\\").replace("'", "\\\\'")
+            query.replace("\\", "\\\\").replace("'", "\\'")
         );
 
         final String url = DRIVE_SEARCH_URL
             + "?q="       + URLEncoder.encode(driveQuery, StandardCharsets.UTF_8)
             + "&key="     + URLEncoder.encode(driveKey, StandardCharsets.UTF_8)
             + "&pageSize=" + SEARCH_MAX_RESULTS
-            + "&fields="  + URLEncoder.encode("files(id,name,mimeType)", StandardCharsets.UTF_8)
-            ;
+            + "&fields="  + URLEncoder.encode("files(id,name,mimeType)", StandardCharsets.UTF_8);
 
         final HttpGet get = new HttpGet(url);
 
