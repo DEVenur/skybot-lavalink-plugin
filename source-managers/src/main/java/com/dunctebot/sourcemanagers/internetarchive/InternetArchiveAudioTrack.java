@@ -31,10 +31,17 @@ import com.sedmelluq.discord.lavaplayer.track.InternalAudioTrack;
 public class InternetArchiveAudioTrack extends Mp3Track {
 
     private final String mimeType;
+    private final long contentLength;
 
-    public InternetArchiveAudioTrack(AudioTrackInfo trackInfo, String mimeType, AbstractDuncteBotHttpSource manager) {
+    public InternetArchiveAudioTrack(
+        AudioTrackInfo trackInfo,
+        String mimeType,
+        long contentLength,
+        AbstractDuncteBotHttpSource manager
+    ) {
         super(trackInfo, manager);
         this.mimeType = mimeType;
+        this.contentLength = contentLength > 0 ? contentLength : Long.MAX_VALUE;
     }
 
     /**
@@ -47,12 +54,12 @@ public class InternetArchiveAudioTrack extends Mp3Track {
     }
 
     /**
-     * Duration is set to Long.MAX_VALUE when unknown (live/unknown-length streams).
-     * PersistentHttpStream reads until EOF in that case.
+     * Mp3Track passes this value to PersistentHttpStream as content length in bytes.
+     * It must never receive AudioTrackInfo.length, which is playback duration in ms.
      */
     @Override
     protected long getTrackDuration() {
-        return this.trackInfo.length;
+        return this.contentLength;
     }
 
     @Override
