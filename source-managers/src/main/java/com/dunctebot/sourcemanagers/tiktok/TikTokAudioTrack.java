@@ -37,10 +37,16 @@ import static com.sedmelluq.discord.lavaplayer.tools.FriendlyException.Severity.
 public class TikTokAudioTrack extends MpegTrack {
 
     private Pair<String, String> urlCache;
+    private TikTokAudioSourceManager.MetaData metadata;
     private boolean failedOnce;
 
     public TikTokAudioTrack(AudioTrackInfo trackInfo, AbstractDuncteBotHttpSource manager) {
         super(trackInfo, manager);
+    }
+
+    TikTokAudioTrack(TikTokAudioSourceManager.MetaData metadata, TikTokAudioSourceManager manager) {
+        super(metadata.toTrackInfo(), manager);
+        this.metadata = metadata;
     }
 
     public Pair<String, String> getUrlCache() {
@@ -101,10 +107,12 @@ public class TikTokAudioTrack extends MpegTrack {
 
     protected Pair<String, String> loadPlaybackUrl() throws Exception {
 
-        String pageUrl = trackInfo.uri;
-        TikTokAudioSourceManager.MetaData metadata = pageUrl != null && !pageUrl.isBlank()
-                ? getSourceManager().extractData(pageUrl)
-                : getSourceManager().extractData(trackInfo.author, trackInfo.identifier);
+        if (metadata == null) {
+            String pageUrl = trackInfo.uri;
+            metadata = pageUrl != null && !pageUrl.isBlank()
+                    ? getSourceManager().extractData(pageUrl)
+                    : getSourceManager().extractData(trackInfo.author, trackInfo.identifier);
+        }
 
         if (metadata == null || metadata.videoUrl == null || metadata.videoUrl.isBlank()) {
             throw new FriendlyException("TikTok metadata extraction failed", SUSPICIOUS, null);
@@ -156,6 +164,10 @@ public class TikTokAudioTrack extends MpegTrack {
 
     @Override
     protected AudioTrack makeShallowClone() {
-        return new TikTokAudioTrack(trackInfo, getSourceManager());
+        TikTokAudioTrack clone = new TikTokAudioTrack(trackInfo, getSourceManager());
+        clone.metadata = metadata;
+        clone.urlCache = urlCache;
+        clone.failedOnce = failedOnce;
+        return clone;
     }
             }
