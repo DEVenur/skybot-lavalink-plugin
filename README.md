@@ -14,8 +14,8 @@ Adding support for the following sources:
   - These files are only accepted over HTTP currently
 - Pixeldrain.com
 - Tumblr.com (when it does not throw a 403 your way)
-- Google Drive (public audio files, to enable search by prefixing with `dvsearch:` set driveKey)
-- Internet Archive Audio (search by prefixing with `iasearch:`)
+- Google Drive (if prefixed with `dvsearch:`, set driveKey)
+- Internet Archive Audio (if prefixed with `iasearch:`)
    
 ## Lavalink version compatibility
 
@@ -70,7 +70,7 @@ plugins:
             soundgasm: true # soundgasm.net
             pixeldrain: true # pixeldrain.com
             tumblr: false # tumblr.com, requires an app to be configured with oauth2 support
-            googledrive: true # drive.google.com
+            googledrive: true # drive.google.com, public audio files
             internetarchive: true # archive.org
 ```
 
