@@ -41,6 +41,9 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
+import java.util.Iterator;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -49,6 +52,13 @@ import static com.dunctebot.sourcemanagers.Utils.fakeChrome;
 public class TikTokAudioSourceManager extends AbstractDuncteBotHttpSource {
 
     private final TikTokAudioTrackHttpManager httpManager = new TikTokAudioTrackHttpManager();
+
+    private static final long TIKWM_MIN_INTERVAL_NANOS = java.util.concurrent.TimeUnit.MILLISECONDS.toNanos(1200);
+    private static final long METADATA_CACHE_TTL_NANOS = java.util.concurrent.TimeUnit.SECONDS.toNanos(10);
+    private static final int METADATA_CACHE_MAX_ENTRIES = 100;
+
+    private final Map<String, CachedMetadata> metadataCache = new LinkedHashMap<>();
+    private long lastTikwmRequestNanos;
 
     private static final Pattern VIDEO_REGEX = Pattern.compile(
             "https?://(?:www\\.|m\\.)?tiktok\\.com/@(?<user>[^/?#]+)/video/(?<video>[0-9]+)(?:[/?#].*)?",
@@ -228,7 +238,28 @@ public class TikTokAudioSourceManager extends AbstractDuncteBotHttpSource {
         return extractData(url);
     }
 
-    protected MetaData extractData(String url) throws Exception {
+    protected synchronized MetaData extractData(String url) throws Exception {
+
+        String cacheKey = normalizeCacheKey(url);
+        long now = System.nanoTime();
+        CachedMetadata cached = metadataCache.get(cacheKey);
+        if (cached != null) {
+            if (now - cached.createdAtNanos < METADATA_CACHE_TTL_NANOS) {
+                return cached.metadata;
+            }
+            metadataCache.remove(cacheKey);
+        }
+
+        // TikWM's free API allows one request per second. Keep a safety margin
+        // and serialize requests from every track using this source manager.
+        if (lastTikwmRequestNanos != 0) {
+            long elapsed = now - lastTikwmRequestNanos;
+            long waitNanos = TIKWM_MIN_INTERVAL_NANOS - elapsed;
+            if (waitNanos > 0) {
+                java.util.concurrent.TimeUnit.NANOSECONDS.sleep(waitNanos);
+            }
+        }
+        lastTikwmRequestNanos = System.nanoTime();
 
         String encodedUrl = URLEncoder.encode(url, StandardCharsets.UTF_8);
         String api = "https://www.tikwm.com/api/?url=" + encodedUrl;
@@ -292,7 +323,49 @@ public class TikTokAudioSourceManager extends AbstractDuncteBotHttpSource {
                 meta.uniqueId = "TikTok";
             }
 
+            cacheMetadata(cacheKey, meta);
             return meta;
+        }
+    }
+
+    private static String normalizeCacheKey(String url) {
+        try {
+            String normalized = normalizeVideoUrl(url);
+            return normalized == null ? url.trim() : normalized;
+        } catch (Exception ignored) {
+            return url.trim();
+        }
+    }
+
+    private void cacheMetadata(String key, MetaData metadata) {
+        long now = System.nanoTime();
+        metadataCache.put(key, new CachedMetadata(metadata, now));
+
+        Iterator<Map.Entry<String, CachedMetadata>> iterator = metadataCache.entrySet().iterator();
+        while (iterator.hasNext()) {
+            Map.Entry<String, CachedMetadata> entry = iterator.next();
+            if (now - entry.getValue().createdAtNanos >= METADATA_CACHE_TTL_NANOS) {
+                iterator.remove();
+            }
+        }
+
+        while (metadataCache.size() > METADATA_CACHE_MAX_ENTRIES) {
+            Iterator<String> keys = metadataCache.keySet().iterator();
+            if (!keys.hasNext()) {
+                break;
+            }
+            keys.next();
+            keys.remove();
+        }
+    }
+
+    private static class CachedMetadata {
+        final MetaData metadata;
+        final long createdAtNanos;
+
+        CachedMetadata(MetaData metadata, long createdAtNanos) {
+            this.metadata = metadata;
+            this.createdAtNanos = createdAtNanos;
         }
     }
 
