@@ -190,7 +190,7 @@ public class TikTokAudioSourceManager extends AbstractDuncteBotHttpSource {
                 return null;
             }
 
-            return new TikTokAudioTrack(metaData.toTrackInfo(), this);
+            return new TikTokAudioTrack(metaData, this);
 
         } catch (Exception e) {
             throw ExceptionTools.wrapUnfriendlyExceptions(
