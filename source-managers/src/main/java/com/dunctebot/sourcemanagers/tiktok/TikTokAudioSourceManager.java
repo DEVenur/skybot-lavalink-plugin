@@ -54,6 +54,9 @@ public class TikTokAudioSourceManager extends AbstractDuncteBotHttpSource {
             "https?://(?:www\\.|m\\.)?tiktok\\.com/@(?<user>[^/?#]+)/video/(?<video>[0-9]+)(?:[/?#].*)?",
             Pattern.CASE_INSENSITIVE
     );
+    private static final Pattern TRAILING_HASHTAGS_REGEX = Pattern.compile(
+            "(?:\\\\s+#[\\\\p{L}\\\\p{N}_]+)+\\\\s*$"
+    );
     private static final Pattern SHORT_URL_REGEX = Pattern.compile(
             "https?://(?:vm|vt)\\.tiktok\\.com/[^/?#]+/?(?:[?#].*)?",
             Pattern.CASE_INSENSITIVE
@@ -62,6 +65,40 @@ public class TikTokAudioSourceManager extends AbstractDuncteBotHttpSource {
             .connectTimeout(java.time.Duration.ofSeconds(10))
             .followRedirects(HttpClient.Redirect.NORMAL)
             .build();
+
+    static String cleanTitle(String title) {
+        if (title == null || title.isBlank()) {
+            return "TikTok video";
+        }
+
+        String cleaned = TRAILING_HASHTAGS_REGEX.matcher(title.trim()).replaceAll("").trim();
+        return cleaned.isEmpty() ? "TikTok video" : cleaned;
+    }
+
+    private static String summarizeApiError(JsonBrowser json, String body) {
+        String code = json.get("code").safeText();
+        String message = json.get("msg").safeText();
+        if (message.isBlank()) {
+            message = json.get("message").safeText();
+        }
+
+        String excerpt = body == null ? "" : body.replaceAll("\\\\s+", " ").trim();
+        if (excerpt.length() > 400) {
+            excerpt = excerpt.substring(0, 400) + "...";
+        }
+
+        StringBuilder details = new StringBuilder();
+        if (!code.isBlank()) {
+            details.append("code=").append(code).append("; ");
+        }
+        if (!message.isBlank()) {
+            details.append("message=").append(message).append("; ");
+        }
+        if (!excerpt.isBlank()) {
+            details.append("response=").append(excerpt);
+        }
+        return details.length() == 0 ? "empty API response" : details.toString();
+    }
 
     public TikTokAudioSourceManager() {
         super(false);
@@ -196,7 +233,12 @@ public class TikTokAudioSourceManager extends AbstractDuncteBotHttpSource {
             int statusCode = response.getStatusLine().getStatusCode();
 
             if (statusCode != 200) {
-                throw new IOException("TikTok API returned status: " + statusCode);
+                String reason = statusCode == 429
+                        ? "TikWM rate limit exceeded (HTTP 429)"
+                        : statusCode >= 500
+                                ? "TikWM service error (HTTP " + statusCode + ")"
+                                : "TikWM HTTP error (HTTP " + statusCode + ")";
+                throw new IOException(reason);
             }
 
             String body = IOUtils.toString(response.getEntity().getContent(), StandardCharsets.UTF_8);
@@ -205,14 +247,18 @@ public class TikTokAudioSourceManager extends AbstractDuncteBotHttpSource {
             JsonBrowser data = json.get("data");
 
             if (data.isNull()) {
-                throw new FriendlyException("TikTok API returned invalid data", Severity.SUSPICIOUS, null);
+                throw new FriendlyException(
+                        "TikWM returned no video data: " + summarizeApiError(json, body),
+                        Severity.SUSPICIOUS,
+                        null
+                );
             }
 
             MetaData meta = new MetaData();
 
             meta.pageUrl = url;
             meta.videoId = data.get("id").safeText();
-            meta.title = data.get("title").safeText();
+            meta.title = cleanTitle(data.get("title").safeText());
             meta.cover = data.get("cover").safeText();
             meta.videoUrl = data.get("play").safeText();
             meta.uri = meta.pageUrl;
