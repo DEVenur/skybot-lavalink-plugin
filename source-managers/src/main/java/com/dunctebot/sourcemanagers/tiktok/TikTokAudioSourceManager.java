@@ -55,7 +55,7 @@ public class TikTokAudioSourceManager extends AbstractDuncteBotHttpSource {
             Pattern.CASE_INSENSITIVE
     );
     private static final Pattern TRAILING_HASHTAGS_REGEX = Pattern.compile(
-            "(?:\\\\s+#[\\\\p{L}\\\\p{N}_]+)+\\\\s*$"
+            "(?:\\s+#[\\p{L}\\p{N}_]+)+\\s*$"
     );
     private static final Pattern SHORT_URL_REGEX = Pattern.compile(
             "https?://(?:vm|vt)\\.tiktok\\.com/[^/?#]+/?(?:[?#].*)?",
@@ -82,7 +82,7 @@ public class TikTokAudioSourceManager extends AbstractDuncteBotHttpSource {
             message = json.get("message").safeText();
         }
 
-        String excerpt = body == null ? "" : body.replaceAll("\\\\s+", " ").trim();
+        String excerpt = body == null ? "" : body.replaceAll("\\s+", " ").trim();
         if (excerpt.length() > 400) {
             excerpt = excerpt.substring(0, 400) + "...";
         }
