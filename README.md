@@ -14,8 +14,8 @@ Adding support for the following sources:
   - These files are only accepted over HTTP currently
 - Pixeldrain.com
 - Tumblr.com (when it does not throw a 403 your way)
-- Google Drive (if prefixed with `dvsearch:`, set driveKey)
-- Internet Archive Audio (if prefixed with `iasearch:`)
+- Google Drive (search by prefixing with `dvsearch:`, set driveKey)
+- Internet Archive Audio (search by prefixing with `iasearch:`)
    
 ## Lavalink version compatibility
 
