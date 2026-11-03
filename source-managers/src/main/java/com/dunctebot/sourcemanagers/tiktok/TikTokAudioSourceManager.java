@@ -256,7 +256,12 @@ public class TikTokAudioSourceManager extends AbstractDuncteBotHttpSource {
             long elapsed = now - lastTikwmRequestNanos;
             long waitNanos = TIKWM_MIN_INTERVAL_NANOS - elapsed;
             if (waitNanos > 0) {
-                java.util.concurrent.TimeUnit.NANOSECONDS.sleep(waitNanos);
+                try {
+                    java.util.concurrent.TimeUnit.NANOSECONDS.sleep(waitNanos);
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                    throw new IOException("Interrupted while waiting for TikWM rate limit", interrupted);
+                }
             }
         }
         lastTikwmRequestNanos = System.nanoTime();
